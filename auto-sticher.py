@@ -48,7 +48,7 @@ def process_file(file):
     #print(cmd)
                           
     # os.rename(os.path.join(RAW_DIR, file), os.path.join(PROCESSING_DIR, file))
-    print("Processed file: " + file)
+    print("Processed file: " + output)
 
 def main():
     last_time_modified = 0
