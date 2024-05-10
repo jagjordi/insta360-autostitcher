@@ -1,0 +1,11 @@
+# Insta360 auto stitcher
+
+version: '3.0'
+services:
+  insta360-autostitcher:
+    container_name: insta360-autostitcher
+    build: .
+    volumes: 
+      - ${RAW_DIR}:/media/raw
+      - ${OUT_DIR}:/media/stitched
+
