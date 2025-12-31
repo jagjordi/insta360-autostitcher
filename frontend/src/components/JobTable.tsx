@@ -9,6 +9,15 @@ interface JobTableProps {
 
 const PAGE_SIZES = [10, 25, 50, 100];
 
+type SortKey = 'timestamp' | 'stitched_size' | 'expected_size' | 'status';
+
+const SORT_OPTIONS: Array<{ value: SortKey; label: string }> = [
+  { value: 'timestamp', label: 'Timestamp' },
+  { value: 'stitched_size', label: 'Output Size' },
+  { value: 'expected_size', label: 'Expected Size' },
+  { value: 'status', label: 'Status' }
+];
+
 const statusLabels: Record<Job['status'], string> = {
   unprocessed: 'Queued',
   processing: 'Processing',
@@ -48,20 +57,42 @@ const formatDate = (timestamp: string) => {
 export function JobTable({ jobs, isLoading }: JobTableProps) {
   const [pageSize, setPageSize] = useState(PAGE_SIZES[0]);
   const [page, setPage] = useState(0);
+  const [sortKey, setSortKey] = useState<SortKey>('timestamp');
+  const [sortDir, setSortDir] = useState<'asc' | 'desc'>('desc');
 
   useEffect(() => {
     setPage(0);
-  }, [pageSize, jobs.length]);
+  }, [pageSize, jobs.length, sortKey, sortDir]);
 
-  const totalPages = Math.max(1, Math.ceil(jobs.length / pageSize));
+  const sortedJobs = useMemo(() => {
+    const multiplier = sortDir === 'asc' ? 1 : -1;
+    return [...jobs].sort((a, b) => {
+      let result = 0;
+      if (sortKey === 'timestamp') {
+        const aTime = new Date(a.timestamp).getTime();
+        const bTime = new Date(b.timestamp).getTime();
+        result = aTime - bTime;
+      } else if (sortKey === 'status') {
+        result = a.status.localeCompare(b.status);
+      } else {
+        result = (a[sortKey] ?? 0) - (b[sortKey] ?? 0);
+      }
+      if (result === 0) {
+        return new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime();
+      }
+      return result * multiplier;
+    });
+  }, [jobs, sortDir, sortKey]);
+
+  const totalPages = Math.max(1, Math.ceil(sortedJobs.length / pageSize));
 
   useEffect(() => {
     setPage((prev) => Math.min(prev, totalPages - 1));
   }, [totalPages]);
 
   const start = page * pageSize;
-  const end = Math.min(start + pageSize, jobs.length);
-  const paginatedJobs = jobs.slice(start, end);
+  const end = Math.min(start + pageSize, sortedJobs.length);
+  const paginatedJobs = sortedJobs.slice(start, end);
 
   const visiblePages = useMemo(() => {
     if (totalPages <= 7) {
@@ -101,8 +132,30 @@ export function JobTable({ jobs, isLoading }: JobTableProps) {
               ))}
             </select>
           </div>
+          <div className="sort-controls">
+            <label htmlFor="sort-field">Sort by:</label>
+            <select
+              id="sort-field"
+              value={sortKey}
+              onChange={(event) => setSortKey(event.target.value as SortKey)}
+            >
+              {SORT_OPTIONS.map((option) => (
+                <option key={option.value} value={option.value}>
+                  {option.label}
+                </option>
+              ))}
+            </select>
+            <button
+              type="button"
+              className="sort-direction"
+              onClick={() => setSortDir((prev) => (prev === 'asc' ? 'desc' : 'asc'))}
+              aria-label="Toggle sort direction"
+            >
+              {sortDir === 'asc' ? '↑' : '↓'}
+            </button>
+          </div>
           <div className="page-info">
-            Showing {start + 1}-{end} of {jobs.length}
+            Showing {start + 1}-{end} of {sortedJobs.length}
           </div>
         </div>
         <table>

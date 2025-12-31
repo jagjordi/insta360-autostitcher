@@ -158,6 +158,29 @@
   color: #7b8496;
 }
 
+.sort-controls {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  font-size: 0.9rem;
+  color: #7b8496;
+}
+
+.sort-controls select {
+  border: 1px solid #dfe3eb;
+  border-radius: 8px;
+  padding: 0.3rem 0.75rem;
+  background: #fff;
+}
+
+.sort-direction {
+  border: 1px solid #dfe3eb;
+  border-radius: 8px;
+  background: #fff;
+  padding: 0.3rem 0.65rem;
+  font-weight: 600;
+}
+
 table {
   width: 100%;
   border-collapse: collapse;

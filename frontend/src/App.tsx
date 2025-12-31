@@ -63,7 +63,6 @@ export default function App() {
   });
 
   const jobs = statusQuery.data?.jobs ?? [];
-  const sortedJobs = useMemo(() => [...jobs].sort((a, b) => (a.timestamp < b.timestamp ? 1 : -1)), [jobs]);
   const summary = useMemo(() => summarizeJobs(jobs), [jobs]);
   const activeJobs = statusQuery.data?.active_jobs ?? [];
   const lastUpdated = statusQuery.dataUpdatedAt ? new Date(statusQuery.dataUpdatedAt).toLocaleTimeString() : '—';
@@ -136,7 +135,7 @@ export default function App() {
         <div className="panel error">Failed to load status: {(statusQuery.error as Error)?.message}</div>
       )}
 
-      <JobTable jobs={sortedJobs} isLoading={statusQuery.isLoading} />
+      <JobTable jobs={jobs} isLoading={statusQuery.isLoading} />
     </div>
   );
 }
