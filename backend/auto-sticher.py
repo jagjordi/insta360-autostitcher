@@ -31,6 +31,7 @@ OUT_DIR = os.path.join(APP_STORAGE_DIR, "stitched")
 DATABASE_PATH = os.getenv(
     "AUTO_STITCHER_DB", os.path.join(APP_STORAGE_DIR, "autostitcher.db")
 )
+THUMBNAIL_DIR = os.path.join(APP_STORAGE_DIR, "thumbnails")
 OUTPUT_SIZE = os.getenv("OUTPUT_SIZE", "5760x2880")
 BITRATE = os.getenv("BITRATE", "200000000")
 STITCH_TYPE = os.getenv("STITCH_TYPE", "dynamicstitch")
@@ -69,14 +70,16 @@ def utc_now() -> str:
 
 def ensure_dirs() -> None:
     LOGGER.debug(
-        "Ensuring storage at %s with RAW=%s OUT=%s",
+        "Ensuring storage at %s with RAW=%s OUT=%s THUMBNAILS=%s",
         APP_STORAGE_DIR,
         RAW_DIR,
         OUT_DIR,
+        THUMBNAIL_DIR,
     )
     os.makedirs(APP_STORAGE_DIR, exist_ok=True)
     os.makedirs(RAW_DIR, exist_ok=True)
     os.makedirs(OUT_DIR, exist_ok=True)
+    os.makedirs(THUMBNAIL_DIR, exist_ok=True)
 
 
 def is_file_writing(path: str) -> bool:
@@ -96,6 +99,10 @@ def stitched_path(timestamp: str) -> str:
 
 def log_path(timestamp: str) -> str:
     return os.path.join(OUT_DIR, f"VID_{timestamp}.log")
+
+
+def thumbnail_path(job_id: str) -> str:
+    return os.path.join(THUMBNAIL_DIR, f"{job_id}.jpg")
 
 
 def configure_paths(
@@ -140,6 +147,69 @@ def count_video_streams(path: str) -> Optional[int]:
         return None
     streams = [line.strip() for line in result.stdout.splitlines() if line.strip()]
     return len(streams)
+
+
+def video_duration_seconds(path: str) -> Optional[float]:
+    cmd = [
+        "ffprobe",
+        "-v",
+        "error",
+        "-select_streams",
+        "v:0",
+        "-show_entries",
+        "format=duration",
+        "-of",
+        "default=noprint_wrappers=1:nokey=1",
+        path,
+    ]
+    try:
+        result = subprocess.run(
+            cmd, capture_output=True, text=True, check=False  # noqa: S603
+        )
+    except FileNotFoundError:
+        LOGGER.error("ffprobe not found when probing %s", path)
+        return None
+    if result.returncode != 0:
+        LOGGER.warning("Unable to probe duration for %s: %s", path, result.stderr.strip())
+        return None
+    try:
+        return float(result.stdout.strip())
+    except ValueError:
+        LOGGER.warning("Invalid duration output for %s: %s", path, result.stdout.strip())
+        return None
+
+
+def extract_thumbnail(source: str, output: str, timestamp: float) -> bool:
+    os.makedirs(os.path.dirname(output), exist_ok=True)
+    seek = max(timestamp, 0)
+    cmd = [
+        "ffmpeg",
+        "-y",
+        "-ss",
+        str(seek),
+        "-i",
+        source,
+        "-map",
+        "0:v:0",
+        "-frames:v",
+        "1",
+        "-vf",
+        "scale=512:512:force_original_aspect_ratio=decrease,pad=512:512:(ow-iw)/2:(oh-ih)/2",
+        "-q:v",
+        "2",
+        output,
+    ]
+    try:
+        result = subprocess.run(cmd, capture_output=True, check=False)  # noqa: S603
+    except FileNotFoundError:
+        LOGGER.error("ffmpeg not found when generating thumbnail for %s", source)
+        return False
+    if result.returncode != 0:
+        LOGGER.warning(
+            "ffmpeg failed for %s: %s", source, result.stderr.decode(errors="ignore")
+        )
+        return False
+    return True
 
 
 @dataclass
@@ -566,7 +636,45 @@ class AutoStitcher:
             return self.stitch(include_failed=False)
         if action == "full_stitch":
             return self.stitch(include_failed=True)
+        if action == "generate_thumbnails":
+            return self.generate_thumbnails()
         raise ValueError(f"Unknown action: {action}")
+
+    def generate_thumbnails(self) -> Dict[str, int]:
+        os.makedirs(THUMBNAIL_DIR, exist_ok=True)
+        rows = self.db.fetch_jobs()
+        generated = 0
+        skipped = 0
+        failed = 0
+        for row in rows:
+            thumb = thumbnail_path(row["id"])
+            if os.path.exists(thumb):
+                skipped += 1
+                continue
+            sources = json.loads(row["source_files"])
+            if not sources:
+                LOGGER.debug("Job %s has no sources; skipping thumbnail", row["id"])
+                failed += 1
+                continue
+            primary = sources[0]
+            if not os.path.exists(primary):
+                LOGGER.debug("Primary source %s missing for job %s", primary, row["id"])
+                failed += 1
+                continue
+            duration = video_duration_seconds(primary) or 0
+            timestamp = duration / 2 if duration > 0 else 0
+            if extract_thumbnail(primary, thumb, timestamp):
+                generated += 1
+                LOGGER.info("Generated thumbnail for job %s at %s", row["id"], thumb)
+            else:
+                failed += 1
+        LOGGER.info(
+            "Thumbnail generation complete (generated=%d, skipped=%d, failed=%d)",
+            generated,
+            skipped,
+            failed,
+        )
+        return {"generated": generated, "skipped": skipped, "failed": failed}
 
 
 def create_app(controller: AutoStitcher) -> Flask:
@@ -581,7 +689,7 @@ def create_app(controller: AutoStitcher) -> Flask:
     def tasks() -> object:
         payload = request.get_json(silent=True) or {}
         action = payload.get("action")
-        if action not in {"scan", "deep_scan", "stitch", "full_stitch"}:
+        if action not in {"scan", "deep_scan", "stitch", "full_stitch", "generate_thumbnails"}:
             LOGGER.warning("Received invalid task action: %s", action)
             return jsonify({"error": "unknown action"}), 400
         LOGGER.info("Scheduling action %s from REST request", action)
@@ -624,7 +732,7 @@ def main() -> None:
     )
     parser.add_argument(
         "command",
-        choices=["serve", "scan", "deep_scan", "stitch", "full_stitch"],
+        choices=["serve", "scan", "deep_scan", "stitch", "full_stitch", "generate_thumbnails"],
         nargs="?",
         default="serve",
         help="Run as REST server (default) or execute a one-off command",

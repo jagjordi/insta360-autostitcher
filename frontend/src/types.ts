@@ -19,4 +19,4 @@ export interface StatusResponse {
   active_jobs: string[];
 }
 
-export type TaskAction = 'scan' | 'deep_scan' | 'stitch' | 'full_stitch';
+export type TaskAction = 'scan' | 'deep_scan' | 'stitch' | 'full_stitch' | 'generate_thumbnails';

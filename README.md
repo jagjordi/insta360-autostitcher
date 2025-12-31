@@ -21,10 +21,10 @@ docker compose up
 
 > The `MEDIA_SDK_DEB` build arg (wired through `.env` and `docker-compose.yml`) must point to the relative path of the Insta360 SDK `.deb` within the `backend/` directory. If you keep the file at `backend/vendor/libMediaSDK-dev_2.0-0_amd64_ubuntu18.04.deb`, set `MEDIA_SDK_DEB=vendor/libMediaSDK-dev_2.0-0_amd64_ubuntu18.04.deb` in `.env` before running `docker compose build`.
 
-All runtime data (SQLite DB, RAW uploads, stitched output, logs) now lives under a single storage root controlled by the `APP_STORAGE_DIR` environment variable (defaults to `/app`). In Docker we bind-mount the host paths from `.env` (`APP_STORAGE_DIR`, `RAW_DIR`, `OUT_DIR`) into `/app`, `/app/raw`, and `/app/stitched` respectively, but the application itself always reads `/app/raw` and `/app/stitched` internally.
+All runtime data (SQLite DB, RAW uploads, stitched output, logs, thumbnails) now lives under a single storage root controlled by the `APP_STORAGE_DIR` environment variable (defaults to `/app`). In Docker we bind-mount the host paths from `.env` (`APP_STORAGE_DIR`, `RAW_DIR`, `OUT_DIR`) into `/app`, `/app/raw`, and `/app/stitched` respectively, while thumbnails are saved under `/app/thumbnails`.
 
 The compose stack now starts two services (both running on the host network, so the chosen ports must be free on the host):
-- `backend` (Flask REST API + stitching worker) listening on `${AUTO_STITCHER_PORT}` (default 8000)
+- `backend` (Flask REST API + stitching worker + thumbnail generator) listening on `${AUTO_STITCHER_PORT}` (default 8000)
 - `frontend` (Vite React build served via nginx) exposed on `${FRONTEND_PORT}` (default 3000 via `NGINX_PORT`) and reverse-proxying `/status` + `/tasks` to `${BACKEND_API_URL}`. Browsers only need to reach the frontend host; nginx forwards API calls over WireGuard/LAN to the backend.
 
 For production builds the frontend now defaults to relative API calls (so `VITE_API_BASE` can be left empty). The proxy target is controlled via `BACKEND_API_URL` in `.env`, and must be reachable from the frontend host (e.g. `http://10.253.0.8:8000`). For local development you can still override `VITE_API_BASE` when running `npm run dev` if you want the browser to talk directly to another controller instance.
@@ -35,7 +35,7 @@ For local testing you can point the backend to the built-in fixtures by overridi
 APP_STORAGE_DIR=backend/test/appdata python backend/auto-sticher.py --storage-dir backend/test/appdata serve
 ```
 
-If you run the controller directly outside of Docker you can still override the RAW and stitched directories via `--raw-dir` / `--output-dir`, but inside the container they are fixed to `/app/raw` and `/app/stitched`.
+If you run the controller directly outside of Docker you can still override the RAW and stitched directories via `--raw-dir` / `--output-dir`, but inside the container they are fixed to `/app/raw` and `/app/stitched`. Generated thumbnails live under `/app/thumbnails`; trigger them via the “Generate Thumbnails” UI button or the `generate_thumbnails` CLI/REST action.
 
 ## Web dashboard
 A minimal React + TypeScript dashboard lives in `frontend/` to show job progress and trigger scans or stitch runs without touching the CLI.

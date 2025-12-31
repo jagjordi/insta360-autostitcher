@@ -30,6 +30,11 @@ const ACTIONS: Array<{
     action: 'full_stitch',
     label: 'Retry Failed',
     description: 'Attempt stitching for failed jobs as well'
+  },
+  {
+    action: 'generate_thumbnails',
+    label: 'Generate Thumbnails',
+    description: 'Extract preview thumbnails for jobs missing them'
   }
 ];
 
@@ -38,6 +43,7 @@ const statusOrder: Record<TaskAction | 'status', number> = {
   deep_scan: 1,
   stitch: 2,
   full_stitch: 3,
+  generate_thumbnails: 4,
   status: 4
 };
 
