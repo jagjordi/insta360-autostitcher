@@ -266,6 +266,15 @@ export default function App() {
         <div className="panel error">Failed to load status: {(statusQuery.error as Error)?.message}</div>
       )}
 
+      <SelectionActions
+        selectedCount={selectedJobs.size}
+        pendingJobs={pendingJobs}
+        onGenerate={() => thumbnailsSelectedMutation.mutate(Array.from(selectedJobs))}
+        onStitch={() => stitchSelectedMutation.mutate(Array.from(selectedJobs))}
+        isGenerating={thumbnailsSelectedMutation.isPending}
+        isStitching={stitchSelectedMutation.isPending}
+        disabled={selectedJobs.size === 0}
+      />
       <JobTable
         jobs={jobs}
         isLoading={statusQuery.isLoading}
@@ -296,29 +305,15 @@ export default function App() {
           })
         }
       />
-      <div className="selection-actions">
-        <span>
-          {selectedJobs.size} selected · {pendingJobs} waiting
-        </span>
-        <div className="selection-buttons">
-          <button
-            type="button"
-            className="ghost"
-            onClick={() => thumbnailsSelectedMutation.mutate(Array.from(selectedJobs))}
-            disabled={selectedJobs.size === 0 || thumbnailsSelectedMutation.isPending}
-          >
-            {thumbnailsSelectedMutation.isPending ? 'Generating…' : 'Thumbnails Selected'}
-          </button>
-          <button
-            type="button"
-            className="primary"
-            onClick={() => stitchSelectedMutation.mutate(Array.from(selectedJobs))}
-            disabled={selectedJobs.size === 0 || stitchSelectedMutation.isPending}
-          >
-            {stitchSelectedMutation.isPending ? 'Stitching…' : 'Stitch Selected'}
-          </button>
-        </div>
-      </div>
+      <SelectionActions
+        selectedCount={selectedJobs.size}
+        pendingJobs={pendingJobs}
+        onGenerate={() => thumbnailsSelectedMutation.mutate(Array.from(selectedJobs))}
+        onStitch={() => stitchSelectedMutation.mutate(Array.from(selectedJobs))}
+        isGenerating={thumbnailsSelectedMutation.isPending}
+        isStitching={stitchSelectedMutation.isPending}
+        disabled={selectedJobs.size === 0}
+      />
       {thumbnailsSelectedMutation.isError && (
         <div className="panel error">
           Failed to generate thumbnails: {(thumbnailsSelectedMutation.error as Error)?.message}
@@ -500,6 +495,42 @@ function SummaryCard({ label, value, tone }: SummaryCardProps) {
     <div className={clsx('summary-card', tone)}>
       <span className="muted">{label}</span>
       <span className="stat-value">{value}</span>
+    </div>
+  );
+}
+
+interface SelectionActionsProps {
+  selectedCount: number;
+  pendingJobs: number;
+  onGenerate: () => void;
+  onStitch: () => void;
+  isGenerating: boolean;
+  isStitching: boolean;
+  disabled: boolean;
+}
+
+function SelectionActions({
+  selectedCount,
+  pendingJobs,
+  onGenerate,
+  onStitch,
+  isGenerating,
+  isStitching,
+  disabled
+}: SelectionActionsProps) {
+  return (
+    <div className="selection-actions">
+      <span>
+        {selectedCount} selected · {pendingJobs} waiting
+      </span>
+      <div className="selection-buttons">
+        <button type="button" className="ghost" onClick={onGenerate} disabled={disabled || isGenerating}>
+          {isGenerating ? 'Generating…' : 'Thumbnails Selected'}
+        </button>
+        <button type="button" className="primary" onClick={onStitch} disabled={disabled || isStitching}>
+          {isStitching ? 'Stitching…' : 'Stitch Selected'}
+        </button>
+      </div>
     </div>
   );
 }
