@@ -607,18 +607,12 @@ def main() -> None:
     parser.add_argument(
         "--raw-dir",
         default=None,
-        help=(
-            "Directory containing RAW INSV files. Defaults to RAW_DIR env var "
-            f"({DEFAULT_RAW_DIR})."
-        ),
+        help="Directory containing RAW INSV files. Defaults to RAW_DIR env var ",
     )
     parser.add_argument(
         "--output-dir",
         default=None,
-        help=(
-            "Directory for stitched MP4s and logs. Defaults to OUT_DIR env var "
-            f"({DEFAULT_OUT_DIR})."
-        ),
+        help="Directory for stitched MP4s and logs. Defaults to OUT_DIR env var ",
     )
     parser.add_argument(
         "--storage-dir",
