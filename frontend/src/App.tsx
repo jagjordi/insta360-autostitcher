@@ -85,6 +85,20 @@ export default function App() {
     });
   }, [jobs]);
 
+  useEffect(() => {
+    if (settingsOpen) {
+      setParallelValue(maxParallelJobs);
+    }
+  }, [settingsOpen, maxParallelJobs]);
+
+  const parallelMutation = useMutation({
+    mutationFn: (value: number) => updateParallelism(value),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['status'] });
+      setSettingsOpen(false);
+    }
+  });
+
   const stitchSelectedMutation = useMutation({
     mutationFn: (jobIds: string[]) => stitchSelectedJobs(jobIds),
     onSuccess: () => {
@@ -284,16 +298,3 @@ function SummaryCard({ label, value, tone }: SummaryCardProps) {
     </div>
   );
 }
-  useEffect(() => {
-    if (settingsOpen) {
-      setParallelValue(maxParallelJobs);
-    }
-  }, [settingsOpen, maxParallelJobs]);
-
-  const parallelMutation = useMutation({
-    mutationFn: (value: number) => updateParallelism(value),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['status'] });
-      setSettingsOpen(false);
-    }
-  });
