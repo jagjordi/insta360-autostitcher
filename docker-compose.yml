@@ -13,6 +13,7 @@ services:
       - .env
     environment:
       APP_STORAGE_DIR: /app
+      AUTO_STITCHER_LOG_LEVEL: ${AUTO_STITCHER_LOG_LEVEL:-INFO}
     network_mode: host
     volumes:
       - ${APP_STORAGE_DIR}:/app
