@@ -20,6 +20,7 @@ export interface StatusResponse {
   active_jobs: string[];
   pending_jobs: number;
   max_parallel_jobs: number;
+  expected_size_ratio: number;
 }
 
 export type TaskAction = 'scan' | 'deep_scan' | 'stitch' | 'full_stitch' | 'generate_thumbnails' | 'stitch_selected';

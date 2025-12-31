@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
+import type { MouseEvent as ReactMouseEvent } from 'react';
 import clsx from 'clsx';
 import type { Job } from '../types';
 
@@ -35,6 +36,54 @@ const statusClasses: Record<Job['status'], string> = {
   processed: 'status-badge success',
   failed: 'status-badge failed'
 };
+
+const PREVIEW_SIZE = 512;
+const PREVIEW_GAP = 12;
+
+function ThumbnailCell({ url, alt }: { url: string; alt: string }) {
+  const wrapperRef = useRef<HTMLDivElement>(null);
+  const [previewPos, setPreviewPos] = useState<{ top: number; left: number } | null>(null);
+
+  const handlePointerMove = (event: ReactMouseEvent<HTMLDivElement>) => {
+    const wrapper = wrapperRef.current;
+    if (!wrapper) {
+      return;
+    }
+    const rect = wrapper.getBoundingClientRect();
+    const viewportHeight = window.innerHeight;
+    const viewportWidth = window.innerWidth;
+    const pointerY = event.clientY;
+    const showAbove = viewportHeight - pointerY < PREVIEW_SIZE + PREVIEW_GAP;
+    let top = showAbove ? pointerY - PREVIEW_GAP - PREVIEW_SIZE : pointerY + PREVIEW_GAP;
+    top = Math.min(Math.max(8, top), viewportHeight - PREVIEW_SIZE - 8);
+    const spaceRight = viewportWidth - rect.right;
+    const showLeft = spaceRight < PREVIEW_SIZE + PREVIEW_GAP && rect.left - PREVIEW_GAP - PREVIEW_SIZE > 0;
+    let left = showLeft ? rect.left - PREVIEW_GAP - PREVIEW_SIZE : rect.right + PREVIEW_GAP;
+    left = Math.min(Math.max(8, left), viewportWidth - PREVIEW_SIZE - 8);
+    setPreviewPos({ top, left });
+  };
+
+  return (
+    <div
+      className="thumbnail-wrapper"
+      ref={wrapperRef}
+      onMouseEnter={handlePointerMove}
+      onMouseMove={handlePointerMove}
+      onMouseLeave={() => setPreviewPos(null)}
+    >
+      <img className="thumbnail" src={url} alt={alt} />
+      {previewPos && (
+        <img
+          className="thumbnail-preview"
+          src={url}
+          alt=""
+          aria-hidden="true"
+          style={{ top: previewPos.top, left: previewPos.left }}
+        />
+      )}
+    </div>
+  );
+}
 
 const formatBytes = (bytes: number) => {
   if (!bytes) {
@@ -227,19 +276,7 @@ export function JobTable({
                   </td>
                   <td>
                     {job.thumbnail_url ? (
-                      <div className="thumbnail-wrapper">
-                        <img
-                          className="thumbnail"
-                          src={job.thumbnail_url}
-                          alt={`Thumbnail for ${job.timestamp}`}
-                        />
-                        <img
-                          className="thumbnail-preview"
-                          src={job.thumbnail_url}
-                          alt=""
-                          aria-hidden="true"
-                        />
-                      </div>
+                      <ThumbnailCell url={job.thumbnail_url} alt={`Thumbnail for ${job.timestamp}`} />
                     ) : (
                       <span className="muted">None</span>
                     )}

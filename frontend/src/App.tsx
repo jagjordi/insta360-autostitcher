@@ -6,7 +6,9 @@ import {
   generateThumbnailsForJobs,
   stitchSelectedJobs,
   triggerTask,
-  updateParallelism
+  updateExpectedRatio,
+  updateParallelism,
+  computeExpectedRatio
 } from './api';
 import type { Job, TaskAction } from './types';
 import { JobTable } from './components/JobTable';
@@ -75,6 +77,7 @@ export default function App() {
   const [selectedJobs, setSelectedJobs] = useState<Set<string>>(new Set());
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [parallelValue, setParallelValue] = useState(1);
+  const [ratioValue, setRatioValue] = useState(1);
 
   useEffect(() => {
     setSelectedJobs((prev) => {
@@ -91,11 +94,21 @@ export default function App() {
     });
   }, [jobs]);
 
-  const parallelMutation = useMutation({
-    mutationFn: (value: number) => updateParallelism(value),
+  const settingsMutation = useMutation({
+    mutationFn: async () => {
+      await Promise.all([updateParallelism(parallelValue), updateExpectedRatio(ratioValue)]);
+    },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['status'] });
       setSettingsOpen(false);
+    }
+  });
+
+  const computeRatioMutation = useMutation({
+    mutationFn: () => computeExpectedRatio(),
+    onSuccess: (data) => {
+      setRatioValue(data.expected_size_ratio);
+      queryClient.invalidateQueries({ queryKey: ['status'] });
     }
   });
 
@@ -116,12 +129,14 @@ export default function App() {
   const activeJobs = statusQuery.data?.active_jobs ?? [];
   const pendingJobs = statusQuery.data?.pending_jobs ?? 0;
   const maxParallelJobs = statusQuery.data?.max_parallel_jobs ?? 1;
+  const expectedRatio = statusQuery.data?.expected_size_ratio ?? 1;
 
   useEffect(() => {
     if (settingsOpen) {
       setParallelValue(maxParallelJobs);
+      setRatioValue(expectedRatio);
     }
-  }, [settingsOpen, maxParallelJobs]);
+  }, [settingsOpen, maxParallelJobs, expectedRatio]);
   const lastUpdated = statusQuery.dataUpdatedAt ? new Date(statusQuery.dataUpdatedAt).toLocaleTimeString() : '—';
 
   const trigger = (action: TaskAction) => {
@@ -276,22 +291,56 @@ export default function App() {
                 const next = Number(event.target.value);
                 setParallelValue(Number.isNaN(next) ? 1 : Math.max(1, Math.round(next)));
               }}
+              disabled={settingsMutation.isPending}
             />
+            <label htmlFor="ratio-input">Expected size ratio</label>
+            <div className="ratio-controls">
+              <input
+                id="ratio-input"
+                type="number"
+                min={0.01}
+                step={0.01}
+                value={ratioValue}
+                onChange={(event) => {
+                  const next = Number(event.target.value);
+                  setRatioValue(Number.isNaN(next) ? 1 : Math.max(0.01, next));
+                }}
+                disabled={settingsMutation.isPending || computeRatioMutation.isPending}
+              />
+              <button
+                type="button"
+                className="ghost"
+                onClick={() => computeRatioMutation.mutate()}
+                disabled={computeRatioMutation.isPending || settingsMutation.isPending}
+              >
+                {computeRatioMutation.isPending ? 'Computing…' : 'Compute Ratio'}
+              </button>
+            </div>
             <div className="modal-actions">
-              <button type="button" className="ghost" onClick={() => setSettingsOpen(false)} disabled={parallelMutation.isPending}>
+              <button
+                type="button"
+                className="ghost"
+                onClick={() => setSettingsOpen(false)}
+                disabled={settingsMutation.isPending}
+              >
                 Cancel
               </button>
               <button
                 type="button"
                 className="primary"
-                onClick={() => parallelMutation.mutate(parallelValue)}
-                disabled={parallelMutation.isPending}
+                onClick={() => settingsMutation.mutate()}
+                disabled={settingsMutation.isPending}
               >
-                {parallelMutation.isPending ? 'Saving…' : 'Save'}
+                {settingsMutation.isPending ? 'Saving…' : 'Save'}
               </button>
             </div>
-            {parallelMutation.isError && (
-              <p className="error">Failed to update parallelism: {(parallelMutation.error as Error)?.message}</p>
+            {computeRatioMutation.isError && (
+              <p className="error">
+                Failed to compute ratio: {(computeRatioMutation.error as Error)?.message}
+              </p>
+            )}
+            {settingsMutation.isError && (
+              <p className="error">Failed to update settings: {(settingsMutation.error as Error)?.message}</p>
             )}
           </div>
         </div>

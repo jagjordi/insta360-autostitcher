@@ -52,3 +52,18 @@ export function updateParallelism(maxParallelJobs: number): Promise<{ max_parall
     body: JSON.stringify({ max_parallel_jobs: maxParallelJobs })
   });
 }
+
+export function updateExpectedRatio(expectedRatio: number): Promise<{ expected_size_ratio: number }> {
+  return request<{ expected_size_ratio: number }>('/settings/ratio', {
+    method: 'POST',
+    headers,
+    body: JSON.stringify({ expected_size_ratio: expectedRatio })
+  });
+}
+
+export function computeExpectedRatio(): Promise<{ expected_size_ratio: number }> {
+  return request<{ expected_size_ratio: number }>('/settings/ratio/compute', {
+    method: 'POST',
+    headers
+  });
+}

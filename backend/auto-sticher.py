@@ -34,6 +34,12 @@ DATABASE_PATH = os.getenv(
 )
 THUMBNAIL_DIR = os.path.join(APP_STORAGE_DIR, "thumbnails")
 DEFAULT_PARALLEL_JOBS = max(int(os.getenv("MAX_PARALLEL_JOBS", "1")), 1)
+try:
+    DEFAULT_EXPECTED_RATIO = float(os.getenv("EXPECTED_SIZE_RATIO", "1.0"))
+except ValueError:
+    DEFAULT_EXPECTED_RATIO = 1.0
+if DEFAULT_EXPECTED_RATIO <= 0:
+    DEFAULT_EXPECTED_RATIO = 1.0
 OUTPUT_SIZE = os.getenv("OUTPUT_SIZE", "5760x2880")
 BITRATE = os.getenv("BITRATE", "200000000")
 STITCH_TYPE = os.getenv("STITCH_TYPE", "dynamicstitch")
@@ -359,6 +365,7 @@ class AutoStitcher:
         self._pending_job_ids: Set[str] = set()
         self.debug_mode = debug
         self.max_parallel_jobs = self._load_parallel_jobs()
+        self.expected_size_ratio = self._load_expected_ratio()
         LOGGER.info(
             "AutoStitcher initialized with DB at %s (debug=%s)", DATABASE_PATH, self.debug_mode
         )
@@ -376,6 +383,19 @@ class AutoStitcher:
         LOGGER.info("Using max_parallel_jobs=%d", value)
         return value
 
+    def _load_expected_ratio(self) -> float:
+        stored = self.db.get_setting("expected_size_ratio")
+        value = DEFAULT_EXPECTED_RATIO
+        if stored is not None:
+            try:
+                value = float(stored)
+            except ValueError:
+                value = DEFAULT_EXPECTED_RATIO
+        value = max(value, 0.01)
+        self.db.set_setting("expected_size_ratio", f"{value:.6f}")
+        LOGGER.info("Using expected_size_ratio=%.4f", value)
+        return value
+
     def set_parallel_jobs(self, count: int) -> None:
         if count < 1:
             raise ValueError("max_parallel_jobs must be >= 1")
@@ -384,6 +404,96 @@ class AutoStitcher:
         self.db.set_setting("max_parallel_jobs", str(count))
         LOGGER.info("Updated max_parallel_jobs to %d", count)
         self._maybe_start_jobs()
+
+    def set_expected_ratio(self, ratio: float) -> None:
+        if ratio <= 0:
+            raise ValueError("expected_size_ratio must be > 0")
+        with self._lock:
+            self.expected_size_ratio = ratio
+            self.db.set_setting("expected_size_ratio", f"{ratio:.6f}")
+        LOGGER.info("Updated expected_size_ratio to %.4f", ratio)
+        self.recalculate_expected_sizes()
+
+    def _base_input_size(self, sources: Iterable[str]) -> Optional[int]:
+        paths = list(sources)
+        if not paths:
+            return 0
+        total = 0
+        for path in paths:
+            try:
+                total += os.path.getsize(path)
+            except FileNotFoundError:
+                LOGGER.debug("Missing source %s while computing base size", path)
+                return None
+        # For single-container files we assume the two camera streams share the bytes equally,
+        # so the combined size is still the file size.
+        return total
+
+    def _calculate_expected_size(self, sources: Iterable[str], base_size: Optional[int] = None) -> int:
+        size = base_size
+        if size is None:
+            size = self._base_input_size(sources)
+        if size is None:
+            return 0
+        return int(round(size * self.expected_size_ratio))
+
+    def recalculate_expected_sizes(self, job_ids: Optional[Iterable[str]] = None) -> None:
+        rows = (
+            self.db.fetch_jobs_by_ids(job_ids)
+            if job_ids is not None
+            else self.db.fetch_jobs()
+        )
+        for row in rows:
+            sources = json.loads(row["source_files"])
+            base_size = self._base_input_size(sources)
+            expected_size = self._calculate_expected_size(sources, base_size)
+            stitched_size = row["stitched_size"] or 0
+            final_file = row["final_file"]
+            if stitched_size == 0 and final_file and os.path.exists(final_file):
+                stitched_size = os.path.getsize(final_file)
+            process_ratio = min(stitched_size / expected_size, 1.0) if expected_size else 0
+            current_expected = row["expected_size"] or 0
+            current_process = row["process"] or 0
+            updates: Dict[str, object] = {}
+            if current_expected != expected_size:
+                updates["expected_size"] = expected_size
+            if abs(current_process - process_ratio) >= 1e-4:
+                updates["process"] = process_ratio
+            if stitched_size and stitched_size != (row["stitched_size"] or 0):
+                updates["stitched_size"] = stitched_size
+            if not updates:
+                continue
+            self.db.update_job(row["id"], **updates)
+            LOGGER.debug(
+                "Job %s expected size refreshed to %d (progress=%.3f)",
+                row["id"],
+                expected_size,
+                process_ratio,
+            )
+
+    def compute_expected_ratio(self) -> float:
+        rows = self.db.fetch_jobs(statuses=[STATUS_PROCESSED])
+        ratios: List[float] = []
+        for row in rows:
+            sources = json.loads(row["source_files"])
+            base_size = self._base_input_size(sources)
+            if not base_size:
+                continue
+            final_file = row["final_file"]
+            stitched_size = (
+                os.path.getsize(final_file)
+                if final_file and os.path.exists(final_file)
+                else row["stitched_size"] or 0
+            )
+            if not stitched_size:
+                continue
+            ratios.append(stitched_size / base_size)
+        if not ratios:
+            raise ValueError("No completed jobs available to compute ratio")
+        avg_ratio = sum(ratios) / len(ratios)
+        self.set_expected_ratio(avg_ratio)
+        LOGGER.info("Computed expected_size_ratio=%.4f from %d completed jobs", avg_ratio, len(ratios))
+        return avg_ratio
 
     # ------------------------------ Discovery ------------------------------
     def discover_candidates(self) -> List[JobCandidate]:
@@ -448,11 +558,11 @@ class AutoStitcher:
             if any(is_file_writing(path) for path in candidate.sources()):
                 LOGGER.debug("Candidate %s still writing; delaying", candidate.timestamp)
                 continue
-            try:
-                expected_size = sum(os.path.getsize(path) for path in candidate.sources())
-            except FileNotFoundError:
+            base_size = self._base_input_size(candidate.sources())
+            if base_size is None:
                 LOGGER.warning("Candidate %s missing source during scan; skipping", candidate.timestamp)
                 continue
+            expected_size = self._calculate_expected_size(candidate.sources(), base_size)
             self.db.insert_job(
                 timestamp=candidate.timestamp,
                 final_file=final_file,
@@ -472,12 +582,8 @@ class AutoStitcher:
         for row in self.db.fetch_jobs():
             sources = json.loads(row["source_files"])
             missing_sources = [path for path in sources if not os.path.exists(path)]
-            expected_size = row["expected_size"]
-            if (not expected_size or expected_size <= 0) and not missing_sources:
-                try:
-                    expected_size = sum(os.path.getsize(path) for path in sources)
-                except FileNotFoundError:
-                    expected_size = 0
+            base_size = None if missing_sources else self._base_input_size(sources)
+            expected_size = self._calculate_expected_size(sources, base_size)
             output_size = os.path.getsize(row["final_file"]) if os.path.exists(row["final_file"]) else 0
             ratio = min(output_size / expected_size, 1.0) if expected_size else 0
             new_status = row["status"]
@@ -654,7 +760,7 @@ class AutoStitcher:
         if not os.path.exists(final_file):
             return
         output_size = os.path.getsize(final_file)
-        expected = row["expected_size"] or self._expected_size(job_id)
+        expected = self._expected_size(job_id)
         ratio = min(output_size / expected, 1.0) if expected else 0
         self.db.update_job(
             job_id,
@@ -667,16 +773,13 @@ class AutoStitcher:
         row = self.db.fetch_job(job_id)
         if not row:
             return 0
-        expected = row["expected_size"]
-        if expected:
-            return expected
-        try:
-            sources = json.loads(row["source_files"])
-            expected = sum(os.path.getsize(path) for path in sources)
-        except FileNotFoundError:
-            expected = 0
-        self.db.update_job(job_id, expected_size=expected)
-        LOGGER.debug("Job %s expected size recalculated to %d", job_id, expected)
+        sources = json.loads(row["source_files"])
+        base_size = self._base_input_size(sources)
+        expected = self._calculate_expected_size(sources, base_size)
+        current_expected = row["expected_size"] or 0
+        if expected != current_expected:
+            self.db.update_job(job_id, expected_size=expected)
+            LOGGER.debug("Job %s expected size recalculated to %d", job_id, expected)
         return expected
 
     # ------------------------------- REST ---------------------------------
@@ -706,6 +809,7 @@ class AutoStitcher:
             "active_jobs": active,
             "pending_jobs": pending,
             "max_parallel_jobs": self.max_parallel_jobs,
+            "expected_size_ratio": self.expected_size_ratio,
         }
 
     def run_action(self, action: str, job_ids: Optional[List[str]] = None) -> Dict[str, int]:
@@ -851,6 +955,33 @@ def create_app(controller: AutoStitcher) -> Flask:
         except ValueError as exc:
             return jsonify({"error": str(exc)}), 400
         return jsonify({"max_parallel_jobs": controller.max_parallel_jobs})
+
+    @app.get("/settings/ratio")
+    def get_ratio() -> object:
+        return jsonify({"expected_size_ratio": controller.expected_size_ratio})
+
+    @app.post("/settings/ratio")
+    def set_ratio() -> object:
+        payload = request.get_json(silent=True) or {}
+        value = payload.get("expected_size_ratio")
+        try:
+            ratio = float(value)
+        except (TypeError, ValueError):
+            LOGGER.warning("Invalid ratio payload: %s", payload)
+            return jsonify({"error": "expected_size_ratio must be a number"}), 400
+        try:
+            controller.set_expected_ratio(ratio)
+        except ValueError as exc:
+            return jsonify({"error": str(exc)}), 400
+        return jsonify({"expected_size_ratio": controller.expected_size_ratio})
+
+    @app.post("/settings/ratio/compute")
+    def compute_ratio() -> object:
+        try:
+            ratio = controller.compute_expected_ratio()
+        except ValueError as exc:
+            return jsonify({"error": str(exc)}), 400
+        return jsonify({"expected_size_ratio": ratio})
 
     return app
 
