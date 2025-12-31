@@ -1,11 +1,32 @@
-# Insta360 auto stitcher
+# Insta360 autostitcher stack
 
-version: '3.0'
+version: '3.8'
+
 services:
-  insta360-autostitcher:
-    container_name: insta360-autostitcher
-    build: .
-    volumes: 
-      - ${RAW_DIR}:/media/raw
-      - ${OUT_DIR}:/media/stitched
+  backend:
+    build:
+      context: ./backend
+      args:
+        - MEDIA_SDK_DEB=${MEDIA_SDK_DEB:-libMediaSDK-dev_2.0-0_amd64_ubuntu18.04.deb}
+    container_name: insta360-backend
+    env_file:
+      - .env
+    environment:
+      APP_STORAGE_DIR: /app
+      RAW_DIR: /app/raw
+      OUT_DIR: /app/stitched
+    ports:
+      - "${AUTO_STITCHER_PORT:-8000}:8000"
+    volumes:
+      - ${APP_STORAGE_DIR}:/app
 
+  frontend:
+    build:
+      context: ./frontend
+      args:
+        - VITE_API_BASE=${VITE_API_BASE:-http://localhost:8000}
+    container_name: insta360-frontend
+    ports:
+      - "${FRONTEND_PORT:-3000}:80"
+    depends_on:
+      - backend

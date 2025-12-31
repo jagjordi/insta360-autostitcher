@@ -5,13 +5,45 @@ Note that this tool uses Insta360 MediaSDK, which requires you to apply for the 
 
 I am not a software engineer so the code might be bad. Use it at your own risk. PRs are welcomed :)
 ## Usage
-1. Get the MediaSDK by applying [here](https://www.insta360.com/sdk/home)
-2. Extract and copy the `libMediaSDK-dev_2.0-0_amd64_ubuntu18.04.deb` package in the repo folder
-3. Build the docker image
+The backend service lives in `backend/`.
+
+1. Get the MediaSDK by applying [here](https://www.insta360.com/sdk/home). Insta360 does not allow redistribution, so each user must download the `.deb` themselves.
+2. Place the downloaded `libMediaSDK-dev_2.0-0_amd64_ubuntu18.04.deb` (or whichever version you received) somewhere under `backend/` (e.g. `backend/vendor/libMediaSDK-dev_...deb`) and set `MEDIA_SDK_DEB` in `.env` (or pass `--build-arg MEDIA_SDK_DEB=vendor/your-file.deb`) so Docker knows which file to copy during the build.
+3. Build the docker images (from the repo root):
 ```bash
-docker build . -t insta360-autostitcher
+docker compose build
 ```
-4. Run it
+4. Run the stack
 ```bash
-docker run -it -v /PATH/TO/YOUR/FILES:/media insta360-autostitcher
+docker compose up
 ```
+
+> The `MEDIA_SDK_DEB` build arg (wired through `.env` and `docker-compose.yml`) must point to the relative path of the Insta360 SDK `.deb` within the `backend/` directory. If you keep the file at `backend/vendor/libMediaSDK-dev_2.0-0_amd64_ubuntu18.04.deb`, set `MEDIA_SDK_DEB=vendor/libMediaSDK-dev_2.0-0_amd64_ubuntu18.04.deb` in `.env` before running `docker compose build`.
+
+All runtime data (SQLite DB, RAW uploads, stitched output, logs) now lives under a single storage root controlled by the `APP_STORAGE_DIR` environment variable (defaults to `/app`, so the backend container simply expects a volume mounted there). Set the host path in `.env` — e.g. `APP_STORAGE_DIR=/mnt/cache/appdata/insta360-autostitcher` — and `docker compose up` will bind-mount that folder to `/app` inside the backend container. The raw and stitched sub-folders can also be overridden via `RAW_DIR` / `OUT_DIR` in `.env` (defaults `/app/raw` and `/app/stitched` inside the container) and will be created automatically if they do not exist.
+
+The compose stack now starts two services:
+- `backend` (Flask REST API + stitching worker) listening on `${AUTO_STITCHER_PORT}` (default 8000)
+- `frontend` (Vite React build served via nginx) exposed on `${FRONTEND_PORT}` (default 3000)
+
+The frontend talks to the backend through the `VITE_API_BASE` build argument/environment variable, which defaults to `http://backend:8000` so that traffic stays inside the compose network. Override it in `.env` if the API should point elsewhere.
+
+For local testing you can point the backend to the built-in fixtures by overriding the storage dir:
+
+```bash
+APP_STORAGE_DIR=backend/test/appdata python backend/auto-sticher.py --storage-dir backend/test/appdata serve
+```
+
+You can still override the RAW and stitched directories independently with `--raw-dir` / `--output-dir` (or `RAW_DIR` / `OUT_DIR` env vars) if you need finer control.
+
+## Web dashboard
+A minimal React + TypeScript dashboard lives in `frontend/` to show job progress and trigger scans or stitch runs without touching the CLI.
+
+### Getting started
+```bash
+cd frontend
+npm install
+npm run dev
+```
+
+The dev server proxies `/status` and `/tasks` to `http://localhost:8000` by default. If your controller runs elsewhere, start the UI with `VITE_API_BASE=http://your-controller:8000 npm run dev` (or set the same variable when building for production).
