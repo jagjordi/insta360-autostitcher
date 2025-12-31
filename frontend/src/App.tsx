@@ -8,7 +8,8 @@ import {
   triggerTask,
   updateExpectedRatio,
   updateParallelism,
-  computeExpectedRatio
+  computeExpectedRatio,
+  updateStitchSettings
 } from './api';
 import type { Job, TaskAction } from './types';
 import { JobTable } from './components/JobTable';
@@ -78,6 +79,10 @@ export default function App() {
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [parallelValue, setParallelValue] = useState(1);
   const [ratioValue, setRatioValue] = useState(1);
+  const [outputSizeValue, setOutputSizeValue] = useState('');
+  const [bitrateValue, setBitrateValue] = useState('');
+  const [stitchTypeValue, setStitchTypeValue] = useState('');
+  const [autoResolution, setAutoResolution] = useState(false);
 
   useEffect(() => {
     setSelectedJobs((prev) => {
@@ -96,7 +101,19 @@ export default function App() {
 
   const settingsMutation = useMutation({
     mutationFn: async () => {
-      await Promise.all([updateParallelism(parallelValue), updateExpectedRatio(ratioValue)]);
+      const sanitizedOutput = outputSizeValue.trim();
+      const sanitizedBitrate = bitrateValue.trim();
+      const sanitizedStitch = stitchTypeValue.trim();
+      await Promise.all([
+        updateParallelism(parallelValue),
+        updateExpectedRatio(ratioValue),
+        updateStitchSettings({
+          output_size: sanitizedOutput,
+          bitrate: sanitizedBitrate,
+          stitch_type: sanitizedStitch,
+          auto_resolution: autoResolution
+        })
+      ]);
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['status'] });
@@ -130,13 +147,18 @@ export default function App() {
   const pendingJobs = statusQuery.data?.pending_jobs ?? 0;
   const maxParallelJobs = statusQuery.data?.max_parallel_jobs ?? 1;
   const expectedRatio = statusQuery.data?.expected_size_ratio ?? 1;
+  const stitchSettings = statusQuery.data?.stitch_settings;
 
   useEffect(() => {
     if (settingsOpen) {
       setParallelValue(maxParallelJobs);
       setRatioValue(expectedRatio);
+      setOutputSizeValue(stitchSettings?.output_size ?? '');
+      setBitrateValue(stitchSettings?.bitrate ?? '');
+      setStitchTypeValue(stitchSettings?.stitch_type ?? '');
+      setAutoResolution(stitchSettings?.auto_resolution ?? false);
     }
-  }, [settingsOpen, maxParallelJobs, expectedRatio]);
+  }, [settingsOpen, maxParallelJobs, expectedRatio, stitchSettings]);
   const lastUpdated = statusQuery.dataUpdatedAt ? new Date(statusQuery.dataUpdatedAt).toLocaleTimeString() : '—';
 
   const trigger = (action: TaskAction) => {
@@ -316,6 +338,43 @@ export default function App() {
                 {computeRatioMutation.isPending ? 'Computing…' : 'Compute Ratio'}
               </button>
             </div>
+            <div className="checkbox-row">
+              <label htmlFor="auto-resolution">
+                <input
+                  id="auto-resolution"
+                  type="checkbox"
+                  checked={autoResolution}
+                  onChange={(event) => setAutoResolution(event.target.checked)}
+                  disabled={settingsMutation.isPending}
+                />
+                Use default resolution (derive from input)
+              </label>
+            </div>
+            <label htmlFor="resolution-input">Output resolution</label>
+            <input
+              id="resolution-input"
+              type="text"
+              value={autoResolution ? '' : outputSizeValue}
+              onChange={(event) => setOutputSizeValue(event.target.value)}
+              disabled={settingsMutation.isPending || autoResolution}
+              placeholder={autoResolution ? 'Auto: 2×input width × input height' : 'e.g. 5760x2880'}
+            />
+            <label htmlFor="bitrate-input">Bitrate</label>
+            <input
+              id="bitrate-input"
+              type="text"
+              value={bitrateValue}
+              onChange={(event) => setBitrateValue(event.target.value)}
+              disabled={settingsMutation.isPending}
+            />
+            <label htmlFor="stitch-type-input">Stitch type</label>
+            <input
+              id="stitch-type-input"
+              type="text"
+              value={stitchTypeValue}
+              onChange={(event) => setStitchTypeValue(event.target.value)}
+              disabled={settingsMutation.isPending}
+            />
             <div className="modal-actions">
               <button
                 type="button"

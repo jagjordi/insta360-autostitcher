@@ -67,3 +67,19 @@ export function computeExpectedRatio(): Promise<{ expected_size_ratio: number }>
     headers
   });
 }
+
+export function updateStitchSettings(settings: {
+  output_size: string;
+  bitrate: string;
+  stitch_type: string;
+  auto_resolution: boolean;
+}): Promise<{ output_size: string; bitrate: string; stitch_type: string; auto_resolution: boolean }> {
+  return request<{ output_size: string; bitrate: string; stitch_type: string; auto_resolution: boolean }>(
+    '/settings/stitch',
+    {
+      method: 'POST',
+      headers,
+      body: JSON.stringify(settings)
+    }
+  );
+}

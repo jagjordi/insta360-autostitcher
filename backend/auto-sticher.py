@@ -40,9 +40,15 @@ except ValueError:
     DEFAULT_EXPECTED_RATIO = 1.0
 if DEFAULT_EXPECTED_RATIO <= 0:
     DEFAULT_EXPECTED_RATIO = 1.0
-OUTPUT_SIZE = os.getenv("OUTPUT_SIZE", "5760x2880")
-BITRATE = os.getenv("BITRATE", "200000000")
-STITCH_TYPE = os.getenv("STITCH_TYPE", "dynamicstitch")
+DEFAULT_OUTPUT_SIZE = os.getenv("OUTPUT_SIZE", "5760x2880")
+DEFAULT_BITRATE = os.getenv("BITRATE", "200000000")
+DEFAULT_STITCH_TYPE = os.getenv("STITCH_TYPE", "dynamicstitch")
+DEFAULT_AUTO_RESOLUTION = os.getenv("AUTO_RESOLUTION", "0").lower() in {
+    "1",
+    "true",
+    "yes",
+    "on",
+}
 SCAN_INTERVAL = int(os.getenv("SCAN_INTERVAL", "600"))
 REST_PORT = int(os.getenv("AUTO_STITCHER_PORT", "8000"))
 LOG_LEVEL = os.getenv("AUTO_STITCHER_LOG_LEVEL", "INFO")
@@ -155,6 +161,50 @@ def count_video_streams(path: str) -> Optional[int]:
         return None
     streams = [line.strip() for line in result.stdout.splitlines() if line.strip()]
     return len(streams)
+
+
+def video_resolution(path: str) -> Optional[tuple[int, int]]:
+    """Return (width, height) for the primary video stream."""
+    cmd = [
+        "ffprobe",
+        "-v",
+        "error",
+        "-select_streams",
+        "v:0",
+        "-show_entries",
+        "stream=width,height",
+        "-of",
+        "csv=p=0",
+        path,
+    ]
+    try:
+        result = subprocess.run(
+            cmd, capture_output=True, text=True, check=False  # noqa: S603
+        )
+    except FileNotFoundError:
+        LOGGER.error("ffprobe not found when probing resolution for %s", path)
+        return None
+    if result.returncode != 0:
+        LOGGER.warning("Unable to probe resolution for %s: %s", path, result.stderr.strip())
+        return None
+    data = result.stdout.strip().split(",")
+    if not data or not data[0]:
+        return None
+    try:
+        if len(data) == 1 and "x" in data[0]:
+            width_str, height_str = data[0].split("x", maxsplit=1)
+        elif len(data) >= 2:
+            width_str, height_str = data[0], data[1]
+        else:
+            return None
+        width = int(width_str)
+        height = int(height_str)
+        if width <= 0 or height <= 0:
+            return None
+        return width, height
+    except (ValueError, IndexError):
+        LOGGER.warning("Invalid resolution output for %s: %s", path, result.stdout.strip())
+        return None
 
 
 def video_duration_seconds(path: str) -> Optional[float]:
@@ -366,6 +416,12 @@ class AutoStitcher:
         self.debug_mode = debug
         self.max_parallel_jobs = self._load_parallel_jobs()
         self.expected_size_ratio = self._load_expected_ratio()
+        (
+            self.output_size,
+            self.bitrate,
+            self.stitch_type,
+            self.auto_resolution,
+        ) = self._load_stitch_settings()
         LOGGER.info(
             "AutoStitcher initialized with DB at %s (debug=%s)", DATABASE_PATH, self.debug_mode
         )
@@ -413,6 +469,56 @@ class AutoStitcher:
             self.db.set_setting("expected_size_ratio", f"{ratio:.6f}")
         LOGGER.info("Updated expected_size_ratio to %.4f", ratio)
         threading.Thread(target=self.recalculate_expected_sizes, daemon=True).start()
+
+    def _load_stitch_settings(self) -> tuple[str, str, str, bool]:
+        output_size = self.db.get_setting("output_size") or DEFAULT_OUTPUT_SIZE
+        bitrate = self.db.get_setting("bitrate") or DEFAULT_BITRATE
+        stitch_type = self.db.get_setting("stitch_type") or DEFAULT_STITCH_TYPE
+        auto_raw = self.db.get_setting("auto_resolution")
+        auto_resolution = (
+            auto_raw.lower() in {"1", "true", "yes", "on"} if auto_raw else DEFAULT_AUTO_RESOLUTION
+        )
+        self.db.set_setting("output_size", output_size)
+        self.db.set_setting("bitrate", bitrate)
+        self.db.set_setting("stitch_type", stitch_type)
+        self.db.set_setting("auto_resolution", "1" if auto_resolution else "0")
+        LOGGER.info(
+            "Using stitch settings output_size=%s bitrate=%s stitch_type=%s auto=%s",
+            output_size,
+            bitrate,
+            stitch_type,
+            auto_resolution,
+        )
+        return output_size, bitrate, stitch_type, auto_resolution
+
+    def set_stitch_settings(
+        self, output_size: Optional[str], bitrate: str, stitch_type: str, auto_resolution: bool
+    ) -> None:
+        output_size = (output_size or "").strip()
+        bitrate = (bitrate or "").strip()
+        stitch_type = (stitch_type or "").strip()
+        if not bitrate or not stitch_type:
+            raise ValueError("bitrate and stitch_type must be provided")
+        if not auto_resolution and not output_size:
+            raise ValueError("output_size must be provided when auto resolution is disabled")
+        if not output_size:
+            output_size = self.output_size or DEFAULT_OUTPUT_SIZE
+        with self._lock:
+            self.output_size = output_size
+            self.bitrate = bitrate
+            self.stitch_type = stitch_type
+            self.auto_resolution = bool(auto_resolution)
+            self.db.set_setting("output_size", output_size)
+            self.db.set_setting("bitrate", bitrate)
+            self.db.set_setting("stitch_type", stitch_type)
+            self.db.set_setting("auto_resolution", "1" if self.auto_resolution else "0")
+        LOGGER.info(
+            "Updated stitch settings output_size=%s bitrate=%s stitch_type=%s auto=%s",
+            output_size,
+            bitrate,
+            stitch_type,
+            self.auto_resolution,
+        )
 
     def _base_input_size(self, sources: Iterable[str]) -> Optional[int]:
         paths = list(sources)
@@ -502,6 +608,22 @@ class AutoStitcher:
             count,
         )
         return avg_ratio, std_dev
+
+    def _auto_output_size(self, sources: Iterable[str]) -> Optional[str]:
+        for path in sources:
+            resolution = video_resolution(path)
+            if not resolution:
+                continue
+            width, height = resolution
+            if width <= 0 or height <= 0:
+                continue
+            derived_width = max(2 * width, 2)
+            derived_height = max(height, 2)
+            output = f"{derived_width}x{derived_height}"
+            LOGGER.debug("Derived auto output size %s from %s", output, path)
+            return output
+        LOGGER.warning("Unable to derive auto output size from sources %s", list(sources))
+        return None
 
     # ------------------------------ Discovery ------------------------------
     def discover_candidates(self) -> List[JobCandidate]:
@@ -691,16 +813,25 @@ class AutoStitcher:
             final_file = row["final_file"]
             log_file = log_path(row["timestamp"])
             LOGGER.info("Job %s starting stitch to %s", job_id, final_file)
+            output_size_value = self.output_size or DEFAULT_OUTPUT_SIZE
+            if self.auto_resolution:
+                derived = self._auto_output_size(sources)
+                if derived:
+                    output_size_value = derived
+                else:
+                    LOGGER.warning(
+                        "Falling back to manual output size %s for job %s", output_size_value, job_id
+                    )
             cmd = [
                 "MediaSDKTest",
                 "-inputs",
                 *sources,
                 "-output_size",
-                OUTPUT_SIZE,
+                output_size_value,
                 "-bitrate",
-                BITRATE,
+                self.bitrate,
                 "-stitch_type",
-                STITCH_TYPE,
+                self.stitch_type,
                 "-output",
                 final_file,
             ]
@@ -818,6 +949,12 @@ class AutoStitcher:
             "pending_jobs": pending,
             "max_parallel_jobs": self.max_parallel_jobs,
             "expected_size_ratio": self.expected_size_ratio,
+            "stitch_settings": {
+                "output_size": self.output_size,
+                "bitrate": self.bitrate,
+                "stitch_type": self.stitch_type,
+                "auto_resolution": self.auto_resolution,
+            },
         }
 
     def run_action(self, action: str, job_ids: Optional[List[str]] = None) -> Dict[str, int]:
@@ -990,6 +1127,36 @@ def create_app(controller: AutoStitcher) -> Flask:
         except ValueError as exc:
             return jsonify({"error": str(exc)}), 400
         return jsonify({"expected_size_ratio": ratio, "std_dev": std_dev})
+
+    @app.get("/settings/stitch")
+    def get_stitch_settings() -> object:
+        return jsonify(
+            {
+                "output_size": controller.output_size,
+                "bitrate": controller.bitrate,
+                "stitch_type": controller.stitch_type,
+            }
+        )
+
+    @app.post("/settings/stitch")
+    def set_stitch_settings() -> object:
+        payload = request.get_json(silent=True) or {}
+        output_size = payload.get("output_size")
+        bitrate = payload.get("bitrate")
+        stitch_type = payload.get("stitch_type")
+        auto_resolution = payload.get("auto_resolution", False)
+        try:
+            controller.set_stitch_settings(output_size, bitrate, stitch_type, bool(auto_resolution))
+        except ValueError as exc:
+            return jsonify({"error": str(exc)}), 400
+        return jsonify(
+            {
+                "output_size": controller.output_size,
+                "bitrate": controller.bitrate,
+                "stitch_type": controller.stitch_type,
+                "auto_resolution": controller.auto_resolution,
+            }
+        )
 
     return app
 

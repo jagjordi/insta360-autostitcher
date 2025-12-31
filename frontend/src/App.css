@@ -417,6 +417,18 @@ tr:hover {
   flex: 1 1 140px;
 }
 
+.checkbox-row {
+  margin-top: 0.5rem;
+}
+
+.checkbox-row label {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  font-size: 0.9rem;
+  color: #1c2230;
+}
+
 .modal-actions {
   display: flex;
   justify-content: flex-end;

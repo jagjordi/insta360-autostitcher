@@ -21,6 +21,12 @@ export interface StatusResponse {
   pending_jobs: number;
   max_parallel_jobs: number;
   expected_size_ratio: number;
+  stitch_settings: {
+    output_size: string;
+    bitrate: string;
+    stitch_type: string;
+    auto_resolution: boolean;
+  };
 }
 
 export type TaskAction = 'scan' | 'deep_scan' | 'stitch' | 'full_stitch' | 'generate_thumbnails' | 'stitch_selected';
