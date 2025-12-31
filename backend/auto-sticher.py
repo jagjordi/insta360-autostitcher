@@ -23,7 +23,7 @@ from dataclasses import dataclass
 from datetime import datetime
 from typing import Dict, Iterable, List, Optional
 
-from flask import Flask, jsonify, request
+from flask import Flask, jsonify, request, send_from_directory
 
 APP_STORAGE_DIR = os.getenv("APP_STORAGE_DIR", "/app").rstrip("/")
 RAW_DIR = os.path.join(APP_STORAGE_DIR, "raw")
@@ -605,20 +605,21 @@ class AutoStitcher:
         return expected
 
     # ------------------------------- REST ---------------------------------
-    def serialize_job(self, row: sqlite3.Row) -> Dict[str, object]:
-        return {
-            "id": row["id"],
-            "timestamp": row["timestamp"],
-            "final_file": row["final_file"],
-            "source_files": json.loads(row["source_files"]),
-            "status": row["status"],
-            "pid": row["pid"],
-            "stitched_size": row["stitched_size"],
-            "process": row["process"],
-            "expected_size": row["expected_size"],
-            "created_at": row["created_at"],
-            "updated_at": row["updated_at"],
-        }
+def serialize_job(self, row: sqlite3.Row) -> Dict[str, object]:
+    return {
+        "id": row["id"],
+        "timestamp": row["timestamp"],
+        "final_file": row["final_file"],
+        "source_files": json.loads(row["source_files"]),
+        "status": row["status"],
+        "pid": row["pid"],
+        "stitched_size": row["stitched_size"],
+        "process": row["process"],
+        "expected_size": row["expected_size"],
+        "created_at": row["created_at"],
+        "updated_at": row["updated_at"],
+        "thumbnail_url": f"/thumbnails/{row['id']}.jpg" if os.path.exists(thumbnail_path(row["id"])) else None,
+    }
 
     def get_status(self) -> Dict[str, object]:
         jobs = [self.serialize_job(row) for row in self.db.fetch_jobs()]
@@ -695,6 +696,14 @@ def create_app(controller: AutoStitcher) -> Flask:
         LOGGER.info("Scheduling action %s from REST request", action)
         threading.Thread(target=controller.run_action, args=(action,), daemon=True).start()
         return jsonify({"scheduled": action})
+
+    @app.get("/thumbnails/<job_id>.jpg")
+    def thumbnails(job_id: str):
+        path = thumbnail_path(job_id)
+        if not os.path.exists(path):
+            LOGGER.debug("Thumbnail for job %s not found", job_id)
+            return ("", 404)
+        return send_from_directory(THUMBNAIL_DIR, f"{job_id}.jpg")
 
     return app
 

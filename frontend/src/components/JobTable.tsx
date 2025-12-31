@@ -108,6 +108,7 @@ export function JobTable({ jobs, isLoading }: JobTableProps) {
         <table>
           <thead>
             <tr>
+              <th>Preview</th>
               <th>Timestamp</th>
               <th>Status</th>
               <th>Progress</th>
@@ -124,6 +125,13 @@ export function JobTable({ jobs, isLoading }: JobTableProps) {
               );
               return (
                 <tr key={job.id}>
+                  <td>
+                    {job.thumbnail_url ? (
+                      <img className="thumbnail" src={job.thumbnail_url} alt={`Thumbnail for ${job.timestamp}`} />
+                    ) : (
+                      <span className="muted">None</span>
+                    )}
+                  </td>
                   <td className="mono">{job.timestamp}</td>
                   <td>
                     <span className={clsx(statusClasses[job.status])}>

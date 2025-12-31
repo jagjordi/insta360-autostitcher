@@ -12,6 +12,7 @@ export interface Job {
   expected_size: number;
   created_at: string;
   updated_at: string;
+  thumbnail_url: string | null;
 }
 
 export interface StatusResponse {

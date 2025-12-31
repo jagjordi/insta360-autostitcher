@@ -19,8 +19,7 @@ services:
     environment:
       APP_STORAGE_DIR: /app
       AUTO_STITCHER_LOG_LEVEL: ${AUTO_STITCHER_LOG_LEVEL:-INFO}
-    ports:
-      - "${AUTO_STITCHER_PORT:-8000}:8000"
+    network_mode: host
     volumes:
       - ${APP_STORAGE_DIR}:/app
       - ${RAW_DIR}:/app/raw
