@@ -25,11 +25,9 @@ from typing import Dict, Iterable, List, Optional
 
 from flask import Flask, jsonify, request
 
-APP_STORAGE_DIR = os.getenv("APP_STORAGE_DIR", "/app")
-DEFAULT_RAW_DIR = os.getenv("RAW_DIR", os.path.join(APP_STORAGE_DIR, "raw"))
-DEFAULT_OUT_DIR = os.getenv("OUT_DIR", os.path.join(APP_STORAGE_DIR, "stitched"))
-RAW_DIR = DEFAULT_RAW_DIR
-OUT_DIR = DEFAULT_OUT_DIR
+APP_STORAGE_DIR = os.getenv("APP_STORAGE_DIR", "/app").rstrip("/")
+RAW_DIR = os.path.join(APP_STORAGE_DIR, "raw")
+OUT_DIR = os.path.join(APP_STORAGE_DIR, "stitched")
 DATABASE_PATH = os.getenv(
     "AUTO_STITCHER_DB", os.path.join(APP_STORAGE_DIR, "autostitcher.db")
 )
@@ -108,12 +106,10 @@ def configure_paths(
 ) -> None:
     """Update global storage paths from CLI args or environment."""
     global APP_STORAGE_DIR, RAW_DIR, OUT_DIR, DATABASE_PATH
-    env_storage = os.getenv("APP_STORAGE_DIR")
-    APP_STORAGE_DIR = storage_dir or env_storage or APP_STORAGE_DIR
-    env_raw = os.getenv("RAW_DIR")
-    RAW_DIR = raw_dir or env_raw or os.path.join(APP_STORAGE_DIR, "raw")
-    env_out = os.getenv("OUT_DIR")
-    OUT_DIR = out_dir or env_out or os.path.join(APP_STORAGE_DIR, "stitched")
+    if storage_dir:
+        APP_STORAGE_DIR = storage_dir.rstrip("/")
+    RAW_DIR = raw_dir or os.path.join(APP_STORAGE_DIR, "raw")
+    OUT_DIR = out_dir or os.path.join(APP_STORAGE_DIR, "stitched")
     env_db = os.getenv("AUTO_STITCHER_DB")
     DATABASE_PATH = db_path or env_db or os.path.join(APP_STORAGE_DIR, "autostitcher.db")
 

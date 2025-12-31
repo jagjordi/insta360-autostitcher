@@ -21,7 +21,7 @@ docker compose up
 
 > The `MEDIA_SDK_DEB` build arg (wired through `.env` and `docker-compose.yml`) must point to the relative path of the Insta360 SDK `.deb` within the `backend/` directory. If you keep the file at `backend/vendor/libMediaSDK-dev_2.0-0_amd64_ubuntu18.04.deb`, set `MEDIA_SDK_DEB=vendor/libMediaSDK-dev_2.0-0_amd64_ubuntu18.04.deb` in `.env` before running `docker compose build`.
 
-All runtime data (SQLite DB, RAW uploads, stitched output, logs) now lives under a single storage root controlled by the `APP_STORAGE_DIR` environment variable (defaults to `/app`, so the backend container simply expects a volume mounted there). Set the host path in `.env` — e.g. `APP_STORAGE_DIR=/mnt/cache/appdata/insta360-autostitcher` — and `docker compose up` will bind-mount that folder to `/app` inside the backend container. The raw and stitched sub-folders can also be overridden via `RAW_DIR` / `OUT_DIR` in `.env` (defaults `/app/raw` and `/app/stitched` inside the container) and will be created automatically if they do not exist.
+All runtime data (SQLite DB, RAW uploads, stitched output, logs) now lives under a single storage root controlled by the `APP_STORAGE_DIR` environment variable (defaults to `/app`). In Docker we bind-mount the host paths from `.env` (`APP_STORAGE_DIR`, `RAW_DIR`, `OUT_DIR`) into `/app`, `/app/raw`, and `/app/stitched` respectively, but the application itself always reads `/app/raw` and `/app/stitched` internally.
 
 The compose stack now starts two services (both running on the host network, so the chosen ports must be free on the host):
 - `backend` (Flask REST API + stitching worker) listening on `${AUTO_STITCHER_PORT}` (default 8000)
@@ -35,7 +35,7 @@ For local testing you can point the backend to the built-in fixtures by overridi
 APP_STORAGE_DIR=backend/test/appdata python backend/auto-sticher.py --storage-dir backend/test/appdata serve
 ```
 
-You can still override the RAW and stitched directories independently with `--raw-dir` / `--output-dir` (or `RAW_DIR` / `OUT_DIR` env vars) if you need finer control.
+If you run the controller directly outside of Docker you can still override the RAW and stitched directories via `--raw-dir` / `--output-dir`, but inside the container they are fixed to `/app/raw` and `/app/stitched`.
 
 ## Web dashboard
 A minimal React + TypeScript dashboard lives in `frontend/` to show job progress and trigger scans or stitch runs without touching the CLI.

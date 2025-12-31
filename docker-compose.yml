@@ -13,11 +13,11 @@ services:
       - .env
     environment:
       APP_STORAGE_DIR: /app
-      RAW_DIR: /app/raw
-      OUT_DIR: /app/stitched
     network_mode: host
     volumes:
       - ${APP_STORAGE_DIR}:/app
+      - ${RAW_DIR}:/app/raw
+      - ${OUT_DIR}:/app/stitched
 
   frontend:
     build:
