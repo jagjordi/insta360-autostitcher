@@ -27,6 +27,11 @@ export interface StatusResponse {
     stitch_type: string;
     auto_resolution: boolean;
   };
+  concurrency?: {
+    stitch: number;
+    scan: number;
+    deep_scan: number;
+  };
 }
 
 export type TaskAction = 'scan' | 'deep_scan' | 'stitch' | 'full_stitch' | 'generate_thumbnails' | 'stitch_selected';

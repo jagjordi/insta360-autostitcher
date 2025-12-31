@@ -45,11 +45,17 @@ export function generateThumbnailsForJobs(jobIds: string[]): Promise<{ scheduled
   });
 }
 
-export function updateParallelism(maxParallelJobs: number): Promise<{ max_parallel_jobs: number }> {
-  return request<{ max_parallel_jobs: number }>('/settings/parallelism', {
+export interface ParallelismPayload {
+  stitch_parallelism: number;
+  scan_parallelism: number;
+  deep_scan_parallelism: number;
+}
+
+export function updateParallelism(payload: ParallelismPayload): Promise<ParallelismPayload> {
+  return request<ParallelismPayload>('/settings/parallelism', {
     method: 'POST',
     headers,
-    body: JSON.stringify({ max_parallel_jobs: maxParallelJobs })
+    body: JSON.stringify(payload)
   });
 }
 

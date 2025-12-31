@@ -77,7 +77,9 @@ export default function App() {
   const jobs = statusQuery.data?.jobs ?? [];
   const [selectedJobs, setSelectedJobs] = useState<Set<string>>(new Set());
   const [settingsOpen, setSettingsOpen] = useState(false);
-  const [parallelValue, setParallelValue] = useState(1);
+  const [stitchConcurrencyValue, setStitchConcurrencyValue] = useState(1);
+  const [scanConcurrencyValue, setScanConcurrencyValue] = useState(25);
+  const [deepScanConcurrencyValue, setDeepScanConcurrencyValue] = useState(1);
   const [ratioValue, setRatioValue] = useState(1);
   const [outputSizeValue, setOutputSizeValue] = useState('');
   const [bitrateValue, setBitrateValue] = useState('');
@@ -101,16 +103,23 @@ export default function App() {
 
   const settingsMutation = useMutation({
     mutationFn: async () => {
+      const sanitizedStitchConcurrency = Math.max(1, Math.round(stitchConcurrencyValue));
+      const sanitizedScanConcurrency = Math.max(1, Math.round(scanConcurrencyValue));
+      const sanitizedDeepConcurrency = Math.max(1, Math.round(deepScanConcurrencyValue));
       const sanitizedOutput = outputSizeValue.trim();
       const sanitizedBitrate = bitrateValue.trim();
-      const sanitizedStitch = stitchTypeValue.trim();
+      const sanitizedStitchType = stitchTypeValue.trim();
       await Promise.all([
-        updateParallelism(parallelValue),
+        updateParallelism({
+          stitch_parallelism: sanitizedStitchConcurrency,
+          scan_parallelism: sanitizedScanConcurrency,
+          deep_scan_parallelism: sanitizedDeepConcurrency
+        }),
         updateExpectedRatio(ratioValue),
         updateStitchSettings({
           output_size: sanitizedOutput,
           bitrate: sanitizedBitrate,
-          stitch_type: sanitizedStitch,
+          stitch_type: sanitizedStitchType,
           auto_resolution: autoResolution
         })
       ]);
@@ -148,17 +157,23 @@ export default function App() {
   const maxParallelJobs = statusQuery.data?.max_parallel_jobs ?? 1;
   const expectedRatio = statusQuery.data?.expected_size_ratio ?? 1;
   const stitchSettings = statusQuery.data?.stitch_settings;
+  const concurrency = statusQuery.data?.concurrency;
+  const stitchConcurrency = concurrency?.stitch ?? maxParallelJobs;
+  const scanConcurrency = concurrency?.scan ?? 25;
+  const deepConcurrency = concurrency?.deep_scan ?? 1;
 
   useEffect(() => {
     if (settingsOpen) {
-      setParallelValue(maxParallelJobs);
+      setStitchConcurrencyValue(stitchConcurrency);
+      setScanConcurrencyValue(scanConcurrency);
+      setDeepScanConcurrencyValue(deepConcurrency);
       setRatioValue(expectedRatio);
       setOutputSizeValue(stitchSettings?.output_size ?? '');
       setBitrateValue(stitchSettings?.bitrate ?? '');
       setStitchTypeValue(stitchSettings?.stitch_type ?? '');
       setAutoResolution(stitchSettings?.auto_resolution ?? false);
     }
-  }, [settingsOpen, maxParallelJobs, expectedRatio, stitchSettings]);
+  }, [settingsOpen, stitchConcurrency, scanConcurrency, deepConcurrency, expectedRatio, stitchSettings]);
   const lastUpdated = statusQuery.dataUpdatedAt ? new Date(statusQuery.dataUpdatedAt).toLocaleTimeString() : '—';
 
   const trigger = (action: TaskAction) => {
@@ -308,10 +323,34 @@ export default function App() {
               id="parallel-input"
               type="number"
               min={1}
-              value={parallelValue}
+              value={stitchConcurrencyValue}
+              onChange={(event) => {
+                  const next = Number(event.target.value);
+                  setStitchConcurrencyValue(Number.isNaN(next) ? 1 : Math.max(1, Math.round(next)));
+                }}
+                disabled={settingsMutation.isPending}
+              />
+            <label htmlFor="scan-concurrency-input">Scan jobs</label>
+            <input
+              id="scan-concurrency-input"
+              type="number"
+              min={1}
+              value={scanConcurrencyValue}
               onChange={(event) => {
                 const next = Number(event.target.value);
-                setParallelValue(Number.isNaN(next) ? 1 : Math.max(1, Math.round(next)));
+                setScanConcurrencyValue(Number.isNaN(next) ? 1 : Math.max(1, Math.round(next)));
+              }}
+              disabled={settingsMutation.isPending}
+            />
+            <label htmlFor="deep-scan-concurrency-input">Deep scan jobs</label>
+            <input
+              id="deep-scan-concurrency-input"
+              type="number"
+              min={1}
+              value={deepScanConcurrencyValue}
+              onChange={(event) => {
+                const next = Number(event.target.value);
+                setDeepScanConcurrencyValue(Number.isNaN(next) ? 1 : Math.max(1, Math.round(next)));
               }}
               disabled={settingsMutation.isPending}
             />
@@ -344,7 +383,13 @@ export default function App() {
                   id="auto-resolution"
                   type="checkbox"
                   checked={autoResolution}
-                  onChange={(event) => setAutoResolution(event.target.checked)}
+                  onChange={(event) => {
+                    const checked = event.target.checked;
+                    setAutoResolution(checked);
+                    if (checked) {
+                      setOutputSizeValue('');
+                    }
+                  }}
                   disabled={settingsMutation.isPending}
                 />
                 Use default resolution (derive from input)

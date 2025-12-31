@@ -23,6 +23,7 @@ from dataclasses import dataclass
 from datetime import datetime
 from typing import Deque, Dict, Iterable, List, Optional, Set
 from collections import deque
+from concurrent.futures import ThreadPoolExecutor
 
 from flask import Flask, jsonify, request, send_from_directory
 
@@ -33,7 +34,9 @@ DATABASE_PATH = os.getenv(
     "AUTO_STITCHER_DB", os.path.join(APP_STORAGE_DIR, "autostitcher.db")
 )
 THUMBNAIL_DIR = os.path.join(APP_STORAGE_DIR, "thumbnails")
-DEFAULT_PARALLEL_JOBS = max(int(os.getenv("MAX_PARALLEL_JOBS", "1")), 1)
+DEFAULT_STITCH_CONCURRENCY = max(int(os.getenv("STITCH_CONCURRENCY", os.getenv("MAX_PARALLEL_JOBS", "1"))), 1)
+DEFAULT_SCAN_CONCURRENCY = max(int(os.getenv("SCAN_CONCURRENCY", "25")), 1)
+DEFAULT_DEEP_SCAN_CONCURRENCY = max(int(os.getenv("DEEP_SCAN_CONCURRENCY", "4")), 1)
 try:
     DEFAULT_EXPECTED_RATIO = float(os.getenv("EXPECTED_SIZE_RATIO", "1.0"))
 except ValueError:
@@ -404,6 +407,11 @@ class JobDatabase:
             ).fetchone()
         return row
 
+    def list_final_files(self) -> Set[str]:
+        with closing(self._connect()) as conn:
+            rows = conn.execute("SELECT final_file FROM jobs").fetchall()
+        return {row[0] for row in rows if row[0]}
+
 
 class AutoStitcher:
     def __init__(self, debug: bool = False) -> None:
@@ -414,7 +422,11 @@ class AutoStitcher:
         self._pending_jobs: Deque[str] = deque()
         self._pending_job_ids: Set[str] = set()
         self.debug_mode = debug
-        self.max_parallel_jobs = self._load_parallel_jobs()
+        (
+            self.stitch_parallelism,
+            self.scan_parallelism,
+            self.deep_scan_parallelism,
+        ) = self._load_concurrency_settings()
         self.expected_size_ratio = self._load_expected_ratio()
         (
             self.output_size,
@@ -426,18 +438,35 @@ class AutoStitcher:
             "AutoStitcher initialized with DB at %s (debug=%s)", DATABASE_PATH, self.debug_mode
         )
 
-    def _load_parallel_jobs(self) -> int:
-        stored = self.db.get_setting("max_parallel_jobs")
-        value = DEFAULT_PARALLEL_JOBS
-        if stored is not None:
+    def _load_concurrency_settings(self) -> tuple[int, int, int]:
+        def load(key: str, default: int) -> tuple[int, Optional[str]]:
+            stored = self.db.get_setting(key)
+            if stored is not None:
+                try:
+                    value = int(stored)
+                except ValueError:
+                    value = default
+            else:
+                value = default
+            value = max(1, value)
+            self.db.set_setting(key, str(value))
+            return value, stored
+
+        stitch, stored_stitch = load("stitch_parallelism", DEFAULT_STITCH_CONCURRENCY)
+        # migrate legacy max_parallel_jobs if present and no explicit stitch setting
+        legacy = self.db.get_setting("max_parallel_jobs")
+        if legacy and stored_stitch is None:
             try:
-                value = int(stored)
+                stitch = max(1, int(legacy))
             except ValueError:
-                value = DEFAULT_PARALLEL_JOBS
-        value = max(1, value)
-        self.db.set_setting("max_parallel_jobs", str(value))
-        LOGGER.info("Using max_parallel_jobs=%d", value)
-        return value
+                stitch = stitch
+            self.db.set_setting("stitch_parallelism", str(stitch))
+        scan, _ = load("scan_parallelism", DEFAULT_SCAN_CONCURRENCY)
+        deep_scan, _ = load("deep_scan_parallelism", DEFAULT_DEEP_SCAN_CONCURRENCY)
+        LOGGER.info(
+            "Using concurrency stitch=%d scan=%d deep_scan=%d", stitch, scan, deep_scan
+        )
+        return stitch, scan, deep_scan
 
     def _load_expected_ratio(self) -> float:
         stored = self.db.get_setting("expected_size_ratio")
@@ -453,13 +482,38 @@ class AutoStitcher:
         return value
 
     def set_parallel_jobs(self, count: int) -> None:
-        if count < 1:
-            raise ValueError("max_parallel_jobs must be >= 1")
+        self.set_concurrency(stitch=count)
+
+    def set_concurrency(
+        self, *, stitch: Optional[int] = None, scan: Optional[int] = None, deep_scan: Optional[int] = None
+    ) -> None:
+        updates: Dict[str, int] = {}
         with self._lock:
-            self.max_parallel_jobs = count
-        self.db.set_setting("max_parallel_jobs", str(count))
-        LOGGER.info("Updated max_parallel_jobs to %d", count)
-        self._maybe_start_jobs()
+            if stitch is not None:
+                if stitch < 1:
+                    raise ValueError("stitch_parallelism must be >= 1")
+                self.stitch_parallelism = stitch
+                updates["stitch_parallelism"] = stitch
+            if scan is not None:
+                if scan < 1:
+                    raise ValueError("scan_parallelism must be >= 1")
+                self.scan_parallelism = scan
+                updates["scan_parallelism"] = scan
+            if deep_scan is not None:
+                if deep_scan < 1:
+                    raise ValueError("deep_scan_parallelism must be >= 1")
+                self.deep_scan_parallelism = deep_scan
+                updates["deep_scan_parallelism"] = deep_scan
+        for key, value in updates.items():
+            self.db.set_setting(key, str(value))
+        if "stitch_parallelism" in updates:
+            self._maybe_start_jobs()
+        LOGGER.info(
+            "Updated concurrency stitch=%d scan=%d deep_scan=%d",
+            self.stitch_parallelism,
+            self.scan_parallelism,
+            self.deep_scan_parallelism,
+        )
 
     def set_expected_ratio(self, ratio: float) -> None:
         if ratio <= 0:
@@ -626,8 +680,9 @@ class AutoStitcher:
         return None
 
     # ------------------------------ Discovery ------------------------------
-    def discover_candidates(self) -> List[JobCandidate]:
+    def discover_candidates(self, existing_final_files: Optional[Set[str]] = None) -> List[JobCandidate]:
         candidates: Dict[str, JobCandidate] = {}
+        existing = existing_final_files or set()
         try:
             raw_files = os.listdir(RAW_DIR)
         except FileNotFoundError:
@@ -640,6 +695,10 @@ class AutoStitcher:
             if not match:
                 continue
             timestamp, segment = match.groups()
+            final_file = stitched_path(timestamp)
+            if final_file in existing:
+                LOGGER.debug("Candidate %s already tracked; skipping early", final_file)
+                continue
             camera_00 = os.path.join(RAW_DIR, file_name)
             stream_count = count_video_streams(camera_00)
             if stream_count is None:
@@ -680,18 +739,24 @@ class AutoStitcher:
     def scan(self) -> Dict[str, int]:
         added = 0
         LOGGER.info("Running scan for new RAW pairs")
-        for candidate in self.discover_candidates():
+        existing = self.db.list_final_files()
+        candidates = self.discover_candidates(existing)
+        if not candidates:
+            LOGGER.info("No new candidates discovered")
+            return {"added": 0}
+
+        def process_candidate(candidate: JobCandidate) -> int:
             final_file = candidate.final_file
             if self.db.find_by_final_file(final_file):
                 LOGGER.debug("Job for %s already exists; skipping", final_file)
-                continue
+                return 0
             if any(is_file_writing(path) for path in candidate.sources()):
                 LOGGER.debug("Candidate %s still writing; delaying", candidate.timestamp)
-                continue
+                return 0
             base_size = self._base_input_size(candidate.sources())
             if base_size is None:
                 LOGGER.warning("Candidate %s missing source during scan; skipping", candidate.timestamp)
-                continue
+                return 0
             expected_size = self._calculate_expected_size(candidate.sources(), base_size)
             self.db.insert_job(
                 timestamp=candidate.timestamp,
@@ -700,16 +765,21 @@ class AutoStitcher:
                 status=STATUS_UNPROCESSED,
                 expected_size=expected_size,
             )
-            added += 1
             LOGGER.info("Queued job %s with expected size %d", candidate.timestamp, expected_size)
+            return 1
+
+        with ThreadPoolExecutor(max_workers=self.scan_parallelism) as executor:
+            for result in executor.map(process_candidate, candidates):
+                added += result
         LOGGER.info("Scan complete; %d new jobs added", added)
         return {"added": added}
 
     def deep_scan(self) -> Dict[str, int]:
         LOGGER.info("Running deep scan to refresh existing jobs")
         summary = self.scan()
-        updated = 0
-        for row in self.db.fetch_jobs():
+        rows = self.db.fetch_jobs()
+
+        def refresh_row(row: sqlite3.Row) -> int:
             sources = json.loads(row["source_files"])
             missing_sources = [path for path in sources if not os.path.exists(path)]
             base_size = None if missing_sources else self._base_input_size(sources)
@@ -737,10 +807,15 @@ class AutoStitcher:
             if missing_sources:
                 fields["pid"] = None
             self.db.update_job(row["id"], **fields)
-            updated += 1
             LOGGER.debug(
                 "Job %s status updated to %s (ratio=%.2f)", row["id"], new_status, ratio
             )
+            return 1
+
+        updated = 0
+        with ThreadPoolExecutor(max_workers=self.deep_scan_parallelism) as executor:
+            for result in executor.map(refresh_row, rows):
+                updated += result
         summary["updated"] = updated
         LOGGER.info("Deep scan refreshed %d jobs", updated)
         return summary
@@ -772,7 +847,7 @@ class AutoStitcher:
     def _maybe_start_jobs(self) -> None:
         while True:
             with self._lock:
-                if len(self._active_threads) >= self.max_parallel_jobs or not self._pending_jobs:
+                if len(self._active_threads) >= self.stitch_parallelism or not self._pending_jobs:
                     return
                 job_id = self._pending_jobs.popleft()
                 self._pending_job_ids.discard(job_id)
@@ -947,13 +1022,18 @@ class AutoStitcher:
             "jobs": jobs,
             "active_jobs": active,
             "pending_jobs": pending,
-            "max_parallel_jobs": self.max_parallel_jobs,
+            "max_parallel_jobs": self.stitch_parallelism,
             "expected_size_ratio": self.expected_size_ratio,
             "stitch_settings": {
                 "output_size": self.output_size,
                 "bitrate": self.bitrate,
                 "stitch_type": self.stitch_type,
                 "auto_resolution": self.auto_resolution,
+            },
+            "concurrency": {
+                "stitch": self.stitch_parallelism,
+                "scan": self.scan_parallelism,
+                "deep_scan": self.deep_scan_parallelism,
             },
         }
 
@@ -1084,22 +1164,52 @@ def create_app(controller: AutoStitcher) -> Flask:
 
     @app.get("/settings/parallelism")
     def get_parallelism() -> object:
-        return jsonify({"max_parallel_jobs": controller.max_parallel_jobs})
+        return jsonify(
+            {
+                "stitch_parallelism": controller.stitch_parallelism,
+                "scan_parallelism": controller.scan_parallelism,
+                "deep_scan_parallelism": controller.deep_scan_parallelism,
+                "max_parallel_jobs": controller.stitch_parallelism,
+            }
+        )
 
     @app.post("/settings/parallelism")
     def set_parallelism() -> object:
         payload = request.get_json(silent=True) or {}
-        value = payload.get("max_parallel_jobs")
+        updates: Dict[str, int] = {}
+        mappings = {
+            "stitch_parallelism": "stitch",
+            "scan_parallelism": "scan",
+            "deep_scan_parallelism": "deep_scan",
+        }
+        for payload_key, field in mappings.items():
+            if payload_key in payload:
+                value = payload[payload_key]
+                try:
+                    updates[field] = int(value)
+                except (TypeError, ValueError):
+                    LOGGER.warning("Invalid %s payload: %s", payload_key, payload)
+                    return jsonify({ "error": f"{payload_key} must be an integer"}), 400
+        if "max_parallel_jobs" in payload and "stitch" not in updates:
+            try:
+                updates["stitch"] = int(payload["max_parallel_jobs"])
+            except (TypeError, ValueError):
+                LOGGER.warning("Invalid max_parallel_jobs payload: %s", payload)
+                return jsonify({"error": "max_parallel_jobs must be an integer"}), 400
+        if not updates:
+            return jsonify({"error": "No parallelism fields provided"}), 400
         try:
-            parsed = int(value)
-        except (TypeError, ValueError):
-            LOGGER.warning("Invalid parallelism payload: %s", payload)
-            return jsonify({"error": "max_parallel_jobs must be an integer"}), 400
-        try:
-            controller.set_parallel_jobs(parsed)
+            controller.set_concurrency(**updates)
         except ValueError as exc:
             return jsonify({"error": str(exc)}), 400
-        return jsonify({"max_parallel_jobs": controller.max_parallel_jobs})
+        return jsonify(
+            {
+                "stitch_parallelism": controller.stitch_parallelism,
+                "scan_parallelism": controller.scan_parallelism,
+                "deep_scan_parallelism": controller.deep_scan_parallelism,
+                "max_parallel_jobs": controller.stitch_parallelism,
+            }
+        )
 
     @app.get("/settings/ratio")
     def get_ratio() -> object:
