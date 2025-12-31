@@ -412,7 +412,7 @@ class AutoStitcher:
             self.expected_size_ratio = ratio
             self.db.set_setting("expected_size_ratio", f"{ratio:.6f}")
         LOGGER.info("Updated expected_size_ratio to %.4f", ratio)
-        self.recalculate_expected_sizes()
+        threading.Thread(target=self.recalculate_expected_sizes, daemon=True).start()
 
     def _base_input_size(self, sources: Iterable[str]) -> Optional[int]:
         paths = list(sources)
