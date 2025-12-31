@@ -15,8 +15,7 @@ services:
       APP_STORAGE_DIR: /app
       RAW_DIR: /app/raw
       OUT_DIR: /app/stitched
-    ports:
-      - "${AUTO_STITCHER_PORT:-8000}:8000"
+    network_mode: host
     volumes:
       - ${APP_STORAGE_DIR}:/app
 
@@ -26,5 +25,4 @@ services:
       args:
         - VITE_API_BASE=${VITE_API_BASE:-http://localhost:8000}
     container_name: insta360-frontend
-    ports:
-      - "${FRONTEND_PORT:-3000}:80"
+    network_mode: host
