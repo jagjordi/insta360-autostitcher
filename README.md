@@ -42,6 +42,8 @@ A minimal React + TypeScript dashboard lives in `frontend/` to show job progress
 
 The job table supports pagination, sorting, and multi-select checkboxes. Select one or more rows and click “Stitch Selected” to queue only those jobs; thumbnails (generated via the backend action) are displayed alongside each entry when available.
 
+Backend stitching respects a configurable parallelism limit (default `1`). Use the “Settings” button in the UI (or POST to `/settings/parallelism` with `{"max_parallel_jobs": N}`) to update it live; the value is persisted in SQLite and can also be seeded via the `MAX_PARALLEL_JOBS` environment variable.
+
 ### Getting started
 ```bash
 cd frontend

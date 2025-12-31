@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import clsx from 'clsx';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { fetchStatus, stitchSelectedJobs, triggerTask } from './api';
+import { fetchStatus, stitchSelectedJobs, triggerTask, updateParallelism } from './api';
 import type { Job, TaskAction } from './types';
 import { JobTable } from './components/JobTable';
 import './App.css';
@@ -38,12 +38,15 @@ const ACTIONS: Array<{
   }
 ];
 
+const SELECTABLE_STATUSES = new Set<Job['status']>(['unprocessed', 'failed']);
+
 const statusOrder: Record<TaskAction | 'status', number> = {
   scan: 0,
   deep_scan: 1,
   stitch: 2,
   full_stitch: 3,
   generate_thumbnails: 4,
+  stitch_selected: 5,
   status: 4
 };
 
@@ -64,10 +67,14 @@ export default function App() {
 
   const jobs = statusQuery.data?.jobs ?? [];
   const [selectedJobs, setSelectedJobs] = useState<Set<string>>(new Set());
+  const [settingsOpen, setSettingsOpen] = useState(false);
+  const [parallelValue, setParallelValue] = useState(1);
 
   useEffect(() => {
     setSelectedJobs((prev) => {
-      const validIds = new Set(jobs.map((job) => job.id));
+      const validIds = new Set(
+        jobs.filter((job) => SELECTABLE_STATUSES.has(job.status)).map((job) => job.id)
+      );
       const next = new Set<string>();
       prev.forEach((id) => {
         if (validIds.has(id)) {
@@ -87,6 +94,8 @@ export default function App() {
   });
   const summary = useMemo(() => summarizeJobs(jobs), [jobs]);
   const activeJobs = statusQuery.data?.active_jobs ?? [];
+  const pendingJobs = statusQuery.data?.pending_jobs ?? 0;
+  const maxParallelJobs = statusQuery.data?.max_parallel_jobs ?? 1;
   const lastUpdated = statusQuery.dataUpdatedAt ? new Date(statusQuery.dataUpdatedAt).toLocaleTimeString() : '—';
 
   const trigger = (action: TaskAction) => {
@@ -110,6 +119,10 @@ export default function App() {
             <span className="stat-value">{activeJobs.length}</span>
           </div>
           <div>
+            <span className="stat-label">Parallel Jobs</span>
+            <span className="stat-value">{maxParallelJobs}</span>
+          </div>
+          <div>
             <span className="stat-label">Last Updated</span>
             <span className="stat-value mono">{lastUpdated}</span>
           </div>
@@ -119,9 +132,14 @@ export default function App() {
       <section className="panel actions">
         <div className="actions-header">
           <h2>Controls</h2>
-          <button className="ghost" type="button" onClick={() => statusQuery.refetch()} disabled={statusQuery.isFetching}>
-            Refresh
-          </button>
+          <div className="action-buttons">
+            <button className="ghost" type="button" onClick={() => statusQuery.refetch()} disabled={statusQuery.isFetching}>
+              Refresh
+            </button>
+            <button className="ghost" type="button" onClick={() => setSettingsOpen(true)}>
+              Settings
+            </button>
+          </div>
         </div>
         <div className="action-grid">
           {ACTIONS.map(({ action, label, description }) => (
@@ -161,6 +179,7 @@ export default function App() {
         jobs={jobs}
         isLoading={statusQuery.isLoading}
         selectedJobs={selectedJobs}
+        selectableStatuses={SELECTABLE_STATUSES}
         onToggleJob={(jobId, selected) =>
           setSelectedJobs((prev) => {
             const next = new Set(prev);
@@ -187,7 +206,9 @@ export default function App() {
         }
       />
       <div className="selection-actions">
-        <span>{selectedJobs.size} selected</span>
+        <span>
+          {selectedJobs.size} selected · {pendingJobs} waiting
+        </span>
         <button
           type="button"
           className="primary"
@@ -199,6 +220,40 @@ export default function App() {
       </div>
       {stitchSelectedMutation.isError && (
         <div className="panel error">Failed to stitch selected: {(stitchSelectedMutation.error as Error)?.message}</div>
+      )}
+      {settingsOpen && (
+        <div className="modal-backdrop">
+          <div className="modal">
+            <h3>Settings</h3>
+            <label htmlFor="parallel-input">Parallel jobs</label>
+            <input
+              id="parallel-input"
+              type="number"
+              min={1}
+              value={parallelValue}
+              onChange={(event) => {
+                const next = Number(event.target.value);
+                setParallelValue(Number.isNaN(next) ? 1 : Math.max(1, Math.round(next)));
+              }}
+            />
+            <div className="modal-actions">
+              <button type="button" className="ghost" onClick={() => setSettingsOpen(false)} disabled={parallelMutation.isPending}>
+                Cancel
+              </button>
+              <button
+                type="button"
+                className="primary"
+                onClick={() => parallelMutation.mutate(parallelValue)}
+                disabled={parallelMutation.isPending}
+              >
+                {parallelMutation.isPending ? 'Saving…' : 'Save'}
+              </button>
+            </div>
+            {parallelMutation.isError && (
+              <p className="error">Failed to update parallelism: {(parallelMutation.error as Error)?.message}</p>
+            )}
+          </div>
+        </div>
       )}
     </div>
   );
@@ -229,3 +284,16 @@ function SummaryCard({ label, value, tone }: SummaryCardProps) {
     </div>
   );
 }
+  useEffect(() => {
+    if (settingsOpen) {
+      setParallelValue(maxParallelJobs);
+    }
+  }, [settingsOpen, maxParallelJobs]);
+
+  const parallelMutation = useMutation({
+    mutationFn: (value: number) => updateParallelism(value),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['status'] });
+      setSettingsOpen(false);
+    }
+  });

@@ -21,7 +21,8 @@ import uuid
 from contextlib import closing
 from dataclasses import dataclass
 from datetime import datetime
-from typing import Dict, Iterable, List, Optional
+from typing import Deque, Dict, Iterable, List, Optional, Set
+from collections import deque
 
 from flask import Flask, jsonify, request, send_from_directory
 
@@ -32,6 +33,7 @@ DATABASE_PATH = os.getenv(
     "AUTO_STITCHER_DB", os.path.join(APP_STORAGE_DIR, "autostitcher.db")
 )
 THUMBNAIL_DIR = os.path.join(APP_STORAGE_DIR, "thumbnails")
+DEFAULT_PARALLEL_JOBS = max(int(os.getenv("MAX_PARALLEL_JOBS", "1")), 1)
 OUTPUT_SIZE = os.getenv("OUTPUT_SIZE", "5760x2880")
 BITRATE = os.getenv("BITRATE", "200000000")
 STITCH_TYPE = os.getenv("STITCH_TYPE", "dynamicstitch")
@@ -261,6 +263,14 @@ class JobDatabase:
                 ON jobs(status)
                 """
             )
+            conn.execute(
+                """
+                CREATE TABLE IF NOT EXISTS settings (
+                    key TEXT PRIMARY KEY,
+                    value TEXT NOT NULL
+                )
+                """
+            )
             conn.commit()
 
     def insert_job(self, *, timestamp: str, final_file: str, source_files: List[str],
@@ -305,6 +315,23 @@ class JobDatabase:
             row = conn.execute("SELECT * FROM jobs WHERE id = ?", (job_id,)).fetchone()
         return row
 
+    def get_setting(self, key: str) -> Optional[str]:
+        with closing(self._connect()) as conn:
+            row = conn.execute("SELECT value FROM settings WHERE key = ?", (key,)).fetchone()
+        return row["value"] if row else None
+
+    def set_setting(self, key: str, value: str) -> None:
+        with closing(self._connect()) as conn:
+            conn.execute(
+                """
+                INSERT INTO settings(key, value)
+                VALUES(?, ?)
+                ON CONFLICT(key) DO UPDATE SET value=excluded.value
+                """,
+                (key, value),
+            )
+            conn.commit()
+
     def fetch_jobs_by_ids(self, job_ids: Iterable[str]) -> List[sqlite3.Row]:
         job_ids = list(job_ids)
         if not job_ids:
@@ -328,10 +355,35 @@ class AutoStitcher:
         self.db = JobDatabase(DATABASE_PATH)
         self._lock = threading.Lock()
         self._active_threads: Dict[str, threading.Thread] = {}
+        self._pending_jobs: Deque[str] = deque()
+        self._pending_job_ids: Set[str] = set()
         self.debug_mode = debug
+        self.max_parallel_jobs = self._load_parallel_jobs()
         LOGGER.info(
             "AutoStitcher initialized with DB at %s (debug=%s)", DATABASE_PATH, self.debug_mode
         )
+
+    def _load_parallel_jobs(self) -> int:
+        stored = self.db.get_setting("max_parallel_jobs")
+        value = DEFAULT_PARALLEL_JOBS
+        if stored is not None:
+            try:
+                value = int(stored)
+            except ValueError:
+                value = DEFAULT_PARALLEL_JOBS
+        value = max(1, value)
+        self.db.set_setting("max_parallel_jobs", str(value))
+        LOGGER.info("Using max_parallel_jobs=%d", value)
+        return value
+
+    def set_parallel_jobs(self, count: int) -> None:
+        if count < 1:
+            raise ValueError("max_parallel_jobs must be >= 1")
+        with self._lock:
+            self.max_parallel_jobs = count
+        self.db.set_setting("max_parallel_jobs", str(count))
+        LOGGER.info("Updated max_parallel_jobs to %d", count)
+        self._maybe_start_jobs()
 
     # ------------------------------ Discovery ------------------------------
     def discover_candidates(self) -> List[JobCandidate]:
@@ -464,23 +516,36 @@ class AutoStitcher:
             statuses.append(STATUS_FAILED)
         jobs = self.db.fetch_jobs(statuses=statuses)
         LOGGER.info("Scheduling stitch run for %d jobs (include_failed=%s)", len(jobs), include_failed)
-        started = 0
+        queued = 0
         for job in jobs:
-            started += int(self._start_job_thread(job))
-        return {"scheduled": started}
+            queued += int(self._enqueue_job(job["id"]))
+        if queued:
+            LOGGER.info("Queued %d jobs for stitching", queued)
+        self._maybe_start_jobs()
+        return {"scheduled": queued}
 
-    def _start_job_thread(self, job: sqlite3.Row) -> bool:
-        job_id = job["id"]
+    def _enqueue_job(self, job_id: str) -> bool:
         with self._lock:
-            thread = self._active_threads.get(job_id)
-            if thread and thread.is_alive():
-                LOGGER.debug("Job %s already running in thread %s", job_id, thread.name)
+            if job_id in self._active_threads or job_id in self._pending_job_ids:
                 return False
-            worker = threading.Thread(target=self._run_job, args=(job_id,), daemon=False)
-            self._active_threads[job_id] = worker
+            self._pending_jobs.append(job_id)
+            self._pending_job_ids.add(job_id)
+        LOGGER.debug("Job %s enqueued for stitching", job_id)
+        return True
+
+    def _maybe_start_jobs(self) -> None:
+        while True:
+            with self._lock:
+                if len(self._active_threads) >= self.max_parallel_jobs or not self._pending_jobs:
+                    return
+                job_id = self._pending_jobs.popleft()
+                self._pending_job_ids.discard(job_id)
+                if job_id in self._active_threads:
+                    continue
+                worker = threading.Thread(target=self._run_job, args=(job_id,), daemon=False)
+                self._active_threads[job_id] = worker
             worker.start()
             LOGGER.info("Started stitching thread %s for job %s", worker.name, job_id)
-            return True
 
     def _run_job(self, job_id: str) -> None:
         try:
@@ -579,6 +644,7 @@ class AutoStitcher:
         finally:
             with self._lock:
                 self._active_threads.pop(job_id, None)
+            self._maybe_start_jobs()
 
     def _refresh_progress(self, job_id: str) -> None:
         row = self.db.fetch_job(job_id)
@@ -634,7 +700,13 @@ class AutoStitcher:
         jobs = [self.serialize_job(row) for row in self.db.fetch_jobs()]
         with self._lock:
             active = list(self._active_threads.keys())
-        return {"jobs": jobs, "active_jobs": active}
+            pending = len(self._pending_jobs)
+        return {
+            "jobs": jobs,
+            "active_jobs": active,
+            "pending_jobs": pending,
+            "max_parallel_jobs": self.max_parallel_jobs,
+        }
 
     def run_action(self, action: str, job_ids: Optional[List[str]] = None) -> Dict[str, int]:
         LOGGER.info("Running action %s", action)
@@ -693,7 +765,7 @@ class AutoStitcher:
             LOGGER.info("No job IDs provided for stitch_selected")
             return {"scheduled": 0}
         rows = self.db.fetch_jobs_by_ids(job_ids)
-        scheduled = 0
+        queued = 0
         allowed_statuses = {STATUS_UNPROCESSED, STATUS_FAILED}
         for row in rows:
             if row["status"] not in allowed_statuses:
@@ -703,9 +775,11 @@ class AutoStitcher:
                     row["status"],
                 )
                 continue
-            scheduled += int(self._start_job_thread(row))
-        LOGGER.info("Scheduled %d jobs for stitch_selected", scheduled)
-        return {"scheduled": scheduled}
+            queued += int(self._enqueue_job(row["id"]))
+        if queued:
+            LOGGER.info("Queued %d selected jobs for stitching", queued)
+        self._maybe_start_jobs()
+        return {"scheduled": queued}
 
 
 def create_app(controller: AutoStitcher) -> Flask:
@@ -742,6 +816,25 @@ def create_app(controller: AutoStitcher) -> Flask:
             LOGGER.debug("Thumbnail for job %s not found", job_id)
             return ("", 404)
         return send_from_directory(THUMBNAIL_DIR, f"{job_id}.jpg")
+
+    @app.get("/settings/parallelism")
+    def get_parallelism() -> object:
+        return jsonify({"max_parallel_jobs": controller.max_parallel_jobs})
+
+    @app.post("/settings/parallelism")
+    def set_parallelism() -> object:
+        payload = request.get_json(silent=True) or {}
+        value = payload.get("max_parallel_jobs")
+        try:
+            parsed = int(value)
+        except (TypeError, ValueError):
+            LOGGER.warning("Invalid parallelism payload: %s", payload)
+            return jsonify({"error": "max_parallel_jobs must be an integer"}), 400
+        try:
+            controller.set_parallel_jobs(parsed)
+        except ValueError as exc:
+            return jsonify({"error": str(exc)}), 400
+        return jsonify({"max_parallel_jobs": controller.max_parallel_jobs})
 
     return app
 

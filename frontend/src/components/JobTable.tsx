@@ -8,6 +8,7 @@ interface JobTableProps {
   selectedJobs: Set<string>;
   onToggleJob: (jobId: string, selected: boolean) => void;
   onTogglePage: (jobIds: string[], selected: boolean) => void;
+  selectableStatuses: Set<Job['status']>;
 }
 
 const PAGE_SIZES = [10, 25, 50, 100];
@@ -57,7 +58,14 @@ const formatDate = (timestamp: string) => {
   }
 };
 
-export function JobTable({ jobs, isLoading, selectedJobs, onToggleJob, onTogglePage }: JobTableProps) {
+export function JobTable({
+  jobs,
+  isLoading,
+  selectedJobs,
+  onToggleJob,
+  onTogglePage,
+  selectableStatuses
+}: JobTableProps) {
   const [pageSize, setPageSize] = useState(PAGE_SIZES[0]);
   const [page, setPage] = useState(0);
   const [sortKey, setSortKey] = useState<SortKey>('timestamp');
@@ -97,15 +105,19 @@ export function JobTable({ jobs, isLoading, selectedJobs, onToggleJob, onToggleP
   const start = page * pageSize;
   const end = Math.min(start + pageSize, sortedJobs.length);
   const paginatedJobs = sortedJobs.slice(start, end);
-  const pageIds = paginatedJobs.map((job) => job.id);
-  const allVisibleSelected = pageIds.length > 0 && pageIds.every((id) => selectedJobs.has(id));
-  const someVisibleSelected = pageIds.some((id) => selectedJobs.has(id)) && !allVisibleSelected;
+  const selectablePageIds = paginatedJobs
+    .filter((job) => selectableStatuses.has(job.status))
+    .map((job) => job.id);
+  const allVisibleSelected =
+    selectablePageIds.length > 0 && selectablePageIds.every((id) => selectedJobs.has(id));
+  const someVisibleSelected =
+    selectablePageIds.some((id) => selectedJobs.has(id)) && !allVisibleSelected;
 
   useEffect(() => {
     if (headerCheckboxRef.current) {
       headerCheckboxRef.current.indeterminate = someVisibleSelected;
     }
-  }, [someVisibleSelected, allVisibleSelected, pageIds.length]);
+  }, [someVisibleSelected, allVisibleSelected, selectablePageIds.length]);
 
   const visiblePages = useMemo(() => {
     if (totalPages <= 7) {
@@ -180,7 +192,8 @@ export function JobTable({ jobs, isLoading, selectedJobs, onToggleJob, onToggleP
                   type="checkbox"
                   className="select-checkbox"
                   checked={allVisibleSelected}
-                  onChange={(event) => onTogglePage(pageIds, event.target.checked)}
+                  onChange={(event) => onTogglePage(selectablePageIds, event.target.checked)}
+                  disabled={selectablePageIds.length === 0}
                   aria-label="Select visible jobs"
                 />
               </th>
@@ -199,6 +212,7 @@ export function JobTable({ jobs, isLoading, selectedJobs, onToggleJob, onToggleP
                 0,
                 Math.min(100, Math.round((job.process ?? 0) * 100))
               );
+              const selectable = selectableStatuses.has(job.status);
               return (
                 <tr key={job.id}>
                   <td className="select-column">
@@ -206,6 +220,7 @@ export function JobTable({ jobs, isLoading, selectedJobs, onToggleJob, onToggleP
                       type="checkbox"
                       className="select-checkbox"
                       checked={selectedJobs.has(job.id)}
+                      disabled={!selectable}
                       onChange={(event) => onToggleJob(job.id, event.target.checked)}
                       aria-label={`Select job ${job.timestamp}`}
                     />

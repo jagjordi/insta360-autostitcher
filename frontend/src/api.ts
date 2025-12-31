@@ -36,3 +36,11 @@ export function stitchSelectedJobs(jobIds: string[]): Promise<{ scheduled: strin
     body: JSON.stringify({ action: 'stitch_selected', job_ids: jobIds })
   });
 }
+
+export function updateParallelism(maxParallelJobs: number): Promise<{ max_parallel_jobs: number }> {
+  return request<{ max_parallel_jobs: number }>('/settings/parallelism', {
+    method: 'POST',
+    headers,
+    body: JSON.stringify({ max_parallel_jobs: maxParallelJobs })
+  });
+}
