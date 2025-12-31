@@ -14,7 +14,8 @@ services:
     environment:
       APP_STORAGE_DIR: /app
       AUTO_STITCHER_LOG_LEVEL: ${AUTO_STITCHER_LOG_LEVEL:-INFO}
-    network_mode: host
+    ports:
+      - "${AUTO_STITCHER_PORT:-8000}:8000"
     volumes:
       - ${APP_STORAGE_DIR}:/app
       - ${RAW_DIR}:/app/raw
@@ -26,7 +27,8 @@ services:
       args:
         - VITE_API_BASE=${VITE_API_BASE:-}
     container_name: insta360-frontend
-    network_mode: host
+    ports:
+      - "${FRONTEND_PORT:-3000}:3000"
     environment:
       NGINX_PORT: ${FRONTEND_PORT:-3000}
       API_PROXY_TARGET: ${BACKEND_API_URL:-http://127.0.0.1:8000}
