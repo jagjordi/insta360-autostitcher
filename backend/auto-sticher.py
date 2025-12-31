@@ -417,6 +417,7 @@ class AutoStitcher:
     def __init__(self, debug: bool = False) -> None:
         ensure_dirs()
         self.db = JobDatabase(DATABASE_PATH)
+        self.db_lock = threading.Lock()
         self._lock = threading.Lock()
         self._active_threads: Dict[str, threading.Thread] = {}
         self._pending_jobs: Deque[str] = deque()
@@ -623,7 +624,8 @@ class AutoStitcher:
                 updates["stitched_size"] = stitched_size
             if not updates:
                 continue
-            self.db.update_job(row["id"], **updates)
+            with self.db_lock:
+                self.db.update_job(row["id"], **updates)
             LOGGER.debug(
                 "Job %s expected size refreshed to %d (progress=%.3f)",
                 row["id"],
