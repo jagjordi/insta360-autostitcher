@@ -605,21 +605,21 @@ class AutoStitcher:
         return expected
 
     # ------------------------------- REST ---------------------------------
-def serialize_job(self, row: sqlite3.Row) -> Dict[str, object]:
-    return {
-        "id": row["id"],
-        "timestamp": row["timestamp"],
-        "final_file": row["final_file"],
-        "source_files": json.loads(row["source_files"]),
-        "status": row["status"],
-        "pid": row["pid"],
-        "stitched_size": row["stitched_size"],
-        "process": row["process"],
-        "expected_size": row["expected_size"],
-        "created_at": row["created_at"],
-        "updated_at": row["updated_at"],
-        "thumbnail_url": f"/thumbnails/{row['id']}.jpg" if os.path.exists(thumbnail_path(row["id"])) else None,
-    }
+    def serialize_job(self, row: sqlite3.Row) -> Dict[str, object]:
+        return {
+            "id": row["id"],
+            "timestamp": row["timestamp"],
+            "final_file": row["final_file"],
+            "source_files": json.loads(row["source_files"]),
+            "status": row["status"],
+            "pid": row["pid"],
+            "stitched_size": row["stitched_size"],
+            "process": row["process"],
+            "expected_size": row["expected_size"],
+            "created_at": row["created_at"],
+            "updated_at": row["updated_at"],
+            "thumbnail_url": f"/thumbnails/{row['id']}.jpg" if os.path.exists(thumbnail_path(row["id"])) else None,
+        }
 
     def get_status(self) -> Dict[str, object]:
         jobs = [self.serialize_job(row) for row in self.db.fetch_jobs()]
