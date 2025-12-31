@@ -1,19 +1,20 @@
-FROM ubuntu:18.04 as base
+FROM ubuntu:22.04 as base
 
 ARG MEDIA_SDK_DEB=libMediaSDK-dev_2.0-0_amd64_ubuntu18.04.deb
 COPY ${MEDIA_SDK_DEB} /tmp/libMediaSDK.deb
 
-RUN dpkg -i /tmp/libMediaSDK.deb && \
-    echo "deb http://security.ubuntu.com/ubuntu xenial-security main" >> /etc/apt/sources.list && \
-    apt-get update && \
-    apt-get install -y \
+RUN set -eux; \
+    apt-get update; \
+    apt-get install -y --no-install-recommends \
       libjpeg-dev \
       libtiff-dev \
-      libjasper-dev \
+      libdc1394-dev \
+      vulkan-tools \
       python3 \
       python3-flask \
-      ffmpeg && \
-    rm -rf /var/lib/apt/lists/*
+      ffmpeg; \
+    apt-get install -y /tmp/libMediaSDK.deb; \
+    rm -rf /var/lib/apt/lists/* /tmp/libMediaSDK.deb
 
 RUN mkdir -p /app
 
