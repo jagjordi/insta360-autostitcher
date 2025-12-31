@@ -85,12 +85,6 @@ export default function App() {
     });
   }, [jobs]);
 
-  useEffect(() => {
-    if (settingsOpen) {
-      setParallelValue(maxParallelJobs);
-    }
-  }, [settingsOpen, maxParallelJobs]);
-
   const parallelMutation = useMutation({
     mutationFn: (value: number) => updateParallelism(value),
     onSuccess: () => {
@@ -110,6 +104,12 @@ export default function App() {
   const activeJobs = statusQuery.data?.active_jobs ?? [];
   const pendingJobs = statusQuery.data?.pending_jobs ?? 0;
   const maxParallelJobs = statusQuery.data?.max_parallel_jobs ?? 1;
+
+  useEffect(() => {
+    if (settingsOpen) {
+      setParallelValue(maxParallelJobs);
+    }
+  }, [settingsOpen, maxParallelJobs]);
   const lastUpdated = statusQuery.dataUpdatedAt ? new Date(statusQuery.dataUpdatedAt).toLocaleTimeString() : '—';
 
   const trigger = (action: TaskAction) => {
