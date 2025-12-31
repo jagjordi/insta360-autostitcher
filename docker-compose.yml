@@ -23,6 +23,11 @@ services:
     build:
       context: ./frontend
       args:
-        - VITE_API_BASE=${VITE_API_BASE:-http://localhost:8000}
+        - VITE_API_BASE=${VITE_API_BASE:-}
     container_name: insta360-frontend
     network_mode: host
+    environment:
+      NGINX_PORT: ${FRONTEND_PORT:-3000}
+      API_PROXY_TARGET: ${BACKEND_API_URL:-http://127.0.0.1:8000}
+    environment:
+      NGINX_PORT: ${FRONTEND_PORT:-3000}

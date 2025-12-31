@@ -9,6 +9,7 @@ The backend service lives in `backend/`.
 
 1. Get the MediaSDK by applying [here](https://www.insta360.com/sdk/home). Insta360 does not allow redistribution, so each user must download the `.deb` themselves.
 2. Place the downloaded `libMediaSDK-dev_2.0-0_amd64_ubuntu18.04.deb` (or whichever version you received) somewhere under `backend/` (e.g. `backend/vendor/libMediaSDK-dev_...deb`) and set `MEDIA_SDK_DEB` in `.env` (or pass `--build-arg MEDIA_SDK_DEB=vendor/your-file.deb`) so Docker knows which file to copy during the build.
+   - Start by copying `.env.example` to `.env` and adjust the paths/ports for your environment.
 3. Build the docker images (from the repo root):
 ```bash
 docker compose build
@@ -22,11 +23,11 @@ docker compose up
 
 All runtime data (SQLite DB, RAW uploads, stitched output, logs) now lives under a single storage root controlled by the `APP_STORAGE_DIR` environment variable (defaults to `/app`, so the backend container simply expects a volume mounted there). Set the host path in `.env` — e.g. `APP_STORAGE_DIR=/mnt/cache/appdata/insta360-autostitcher` — and `docker compose up` will bind-mount that folder to `/app` inside the backend container. The raw and stitched sub-folders can also be overridden via `RAW_DIR` / `OUT_DIR` in `.env` (defaults `/app/raw` and `/app/stitched` inside the container) and will be created automatically if they do not exist.
 
-The compose stack now starts two services:
+The compose stack now starts two services (both running on the host network, so the chosen ports must be free on the host):
 - `backend` (Flask REST API + stitching worker) listening on `${AUTO_STITCHER_PORT}` (default 8000)
-- `frontend` (Vite React build served via nginx) exposed on `${FRONTEND_PORT}` (default 3000)
+- `frontend` (Vite React build served via nginx) exposed on `${FRONTEND_PORT}` (default 3000 via `NGINX_PORT`) and reverse-proxying `/status` + `/tasks` to `${BACKEND_API_URL}`. Browsers only need to reach the frontend host; nginx forwards API calls over WireGuard/LAN to the backend.
 
-The frontend talks to the backend through the `VITE_API_BASE` build argument/environment variable, which defaults to `http://backend:8000` so that traffic stays inside the compose network. Override it in `.env` if the API should point elsewhere.
+For production builds the frontend now defaults to relative API calls (so `VITE_API_BASE` can be left empty). The proxy target is controlled via `BACKEND_API_URL` in `.env`, and must be reachable from the frontend host (e.g. `http://10.253.0.8:8000`). For local development you can still override `VITE_API_BASE` when running `npm run dev` if you want the browser to talk directly to another controller instance.
 
 For local testing you can point the backend to the built-in fixtures by overriding the storage dir:
 
