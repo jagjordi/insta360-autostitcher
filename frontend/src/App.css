@@ -128,6 +128,36 @@
   overflow-x: auto;
 }
 
+.table-controls {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 1rem;
+  margin-bottom: 0.75rem;
+}
+
+.page-size-select {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  font-size: 0.9rem;
+  color: #7b8496;
+}
+
+.page-size-select select {
+  border: 1px solid #dfe3eb;
+  border-radius: 8px;
+  padding: 0.3rem 0.75rem;
+  background: #fff;
+  font-size: 0.9rem;
+}
+
+.page-info {
+  font-size: 0.9rem;
+  color: #7b8496;
+}
+
 table {
   width: 100%;
   border-collapse: collapse;
@@ -203,6 +233,43 @@ tr:hover {
   height: 100%;
   border-radius: inherit;
   background: linear-gradient(90deg, #7b5dff, #52c99f);
+}
+
+.pagination {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 0.35rem;
+  margin-top: 1rem;
+  flex-wrap: wrap;
+}
+
+.page-button,
+.page-arrow {
+  border: 1px solid #dfe3eb;
+  background: #fff;
+  border-radius: 8px;
+  min-width: 2.25rem;
+  padding: 0.35rem 0.75rem;
+  font-weight: 600;
+  color: #1c2230;
+}
+
+.page-button.active {
+  background: #7b5dff;
+  color: #fff;
+  border-color: #7b5dff;
+}
+
+.page-button:disabled,
+.page-arrow:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.ellipsis {
+  color: #7b8496;
+  margin: 0 0.25rem;
 }
 
 .error {
