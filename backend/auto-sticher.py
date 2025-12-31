@@ -639,7 +639,7 @@ def main() -> None:
     debug_mode = args.debug or DEBUG_FLAG
     log_level = "DEBUG" if debug_mode else args.log_level
     configure_logging(log_level)
-    LOGGER.debug("Logger configured at %s level (debug=%s)", log_level, debug_mode)
+    LOGGER.info("Logger configured at %s level (debug=%s)", log_level.upper(), debug_mode)
     configure_paths(
         storage_dir=args.storage_dir,
         raw_dir=args.raw_dir,
