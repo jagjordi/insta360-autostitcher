@@ -80,6 +80,7 @@ export default function App() {
   const [stitchConcurrencyValue, setStitchConcurrencyValue] = useState(1);
   const [scanConcurrencyValue, setScanConcurrencyValue] = useState(25);
   const [deepScanConcurrencyValue, setDeepScanConcurrencyValue] = useState(1);
+  const [thumbnailConcurrencyValue, setThumbnailConcurrencyValue] = useState(4);
   const [ratioValue, setRatioValue] = useState(1);
   const [outputSizeValue, setOutputSizeValue] = useState('');
   const [bitrateValue, setBitrateValue] = useState('');
@@ -106,6 +107,7 @@ export default function App() {
       const sanitizedStitchConcurrency = Math.max(1, Math.round(stitchConcurrencyValue));
       const sanitizedScanConcurrency = Math.max(1, Math.round(scanConcurrencyValue));
       const sanitizedDeepConcurrency = Math.max(1, Math.round(deepScanConcurrencyValue));
+      const sanitizedThumbnailConcurrency = Math.max(1, Math.round(thumbnailConcurrencyValue));
       const sanitizedOutput = outputSizeValue.trim();
       const sanitizedBitrate = bitrateValue.trim();
       const sanitizedStitchType = stitchTypeValue.trim();
@@ -113,7 +115,8 @@ export default function App() {
         updateParallelism({
           stitch_parallelism: sanitizedStitchConcurrency,
           scan_parallelism: sanitizedScanConcurrency,
-          deep_scan_parallelism: sanitizedDeepConcurrency
+          deep_scan_parallelism: sanitizedDeepConcurrency,
+          thumbnail_parallelism: sanitizedThumbnailConcurrency
         }),
         updateExpectedRatio(ratioValue),
         updateStitchSettings({
@@ -161,6 +164,7 @@ export default function App() {
   const stitchConcurrency = concurrency?.stitch ?? maxParallelJobs;
   const scanConcurrency = concurrency?.scan ?? 25;
   const deepConcurrency = concurrency?.deep_scan ?? 1;
+  const thumbnailConcurrency = concurrency?.thumbnails ?? 4;
 
   useEffect(() => {
     if (settingsOpen) {
@@ -172,8 +176,17 @@ export default function App() {
       setBitrateValue(stitchSettings?.bitrate ?? '');
       setStitchTypeValue(stitchSettings?.stitch_type ?? '');
       setAutoResolution(stitchSettings?.auto_resolution ?? false);
+      setThumbnailConcurrencyValue(thumbnailConcurrency);
     }
-  }, [settingsOpen, stitchConcurrency, scanConcurrency, deepConcurrency, expectedRatio, stitchSettings]);
+  }, [
+    settingsOpen,
+    stitchConcurrency,
+    scanConcurrency,
+    deepConcurrency,
+    thumbnailConcurrency,
+    expectedRatio,
+    stitchSettings
+  ]);
   const lastUpdated = statusQuery.dataUpdatedAt ? new Date(statusQuery.dataUpdatedAt).toLocaleTimeString() : '—';
 
   const trigger = (action: TaskAction) => {
@@ -197,7 +210,7 @@ export default function App() {
             <span className="stat-value">{activeJobs.length}</span>
           </div>
           <div>
-            <span className="stat-label">Parallel Jobs</span>
+            <span className="stat-label">Stitching Jobs</span>
             <span className="stat-value">{maxParallelJobs}</span>
           </div>
           <div>
@@ -318,7 +331,7 @@ export default function App() {
         <div className="modal-backdrop">
           <div className="modal">
             <h3>Settings</h3>
-            <label htmlFor="parallel-input">Parallel jobs</label>
+            <label htmlFor="parallel-input">Stitching jobs</label>
             <input
               id="parallel-input"
               type="number"
@@ -351,6 +364,18 @@ export default function App() {
               onChange={(event) => {
                 const next = Number(event.target.value);
                 setDeepScanConcurrencyValue(Number.isNaN(next) ? 1 : Math.max(1, Math.round(next)));
+              }}
+              disabled={settingsMutation.isPending}
+            />
+            <label htmlFor="thumbnail-concurrency-input">Thumbnail jobs</label>
+            <input
+              id="thumbnail-concurrency-input"
+              type="number"
+              min={1}
+              value={thumbnailConcurrencyValue}
+              onChange={(event) => {
+                const next = Number(event.target.value);
+                setThumbnailConcurrencyValue(Number.isNaN(next) ? 1 : Math.max(1, Math.round(next)));
               }}
               disabled={settingsMutation.isPending}
             />

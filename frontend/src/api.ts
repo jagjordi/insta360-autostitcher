@@ -49,6 +49,7 @@ export interface ParallelismPayload {
   stitch_parallelism: number;
   scan_parallelism: number;
   deep_scan_parallelism: number;
+  thumbnail_parallelism: number;
 }
 
 export function updateParallelism(payload: ParallelismPayload): Promise<ParallelismPayload> {

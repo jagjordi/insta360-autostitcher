@@ -31,6 +31,7 @@ export interface StatusResponse {
     stitch: number;
     scan: number;
     deep_scan: number;
+    thumbnails: number;
   };
 }
 

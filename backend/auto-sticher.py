@@ -34,9 +34,12 @@ DATABASE_PATH = os.getenv(
     "AUTO_STITCHER_DB", os.path.join(APP_STORAGE_DIR, "autostitcher.db")
 )
 THUMBNAIL_DIR = os.path.join(APP_STORAGE_DIR, "thumbnails")
-DEFAULT_STITCH_CONCURRENCY = max(int(os.getenv("STITCH_CONCURRENCY", os.getenv("MAX_PARALLEL_JOBS", "1"))), 1)
+DEFAULT_STITCH_CONCURRENCY = max(
+    int(os.getenv("STITCH_CONCURRENCY", os.getenv("MAX_PARALLEL_JOBS", "1"))), 1
+)
 DEFAULT_SCAN_CONCURRENCY = max(int(os.getenv("SCAN_CONCURRENCY", "25")), 1)
 DEFAULT_DEEP_SCAN_CONCURRENCY = max(int(os.getenv("DEEP_SCAN_CONCURRENCY", "4")), 1)
+DEFAULT_THUMBNAIL_CONCURRENCY = max(int(os.getenv("THUMBNAIL_CONCURRENCY", "4")), 1)
 try:
     DEFAULT_EXPECTED_RATIO = float(os.getenv("EXPECTED_SIZE_RATIO", "1.0"))
 except ValueError:
@@ -427,6 +430,7 @@ class AutoStitcher:
             self.stitch_parallelism,
             self.scan_parallelism,
             self.deep_scan_parallelism,
+            self.thumbnail_parallelism,
         ) = self._load_concurrency_settings()
         self.expected_size_ratio = self._load_expected_ratio()
         (
@@ -439,7 +443,7 @@ class AutoStitcher:
             "AutoStitcher initialized with DB at %s (debug=%s)", DATABASE_PATH, self.debug_mode
         )
 
-    def _load_concurrency_settings(self) -> tuple[int, int, int]:
+    def _load_concurrency_settings(self) -> tuple[int, int, int, int]:
         def load(key: str, default: int) -> tuple[int, Optional[str]]:
             stored = self.db.get_setting(key)
             if stored is not None:
@@ -464,10 +468,15 @@ class AutoStitcher:
             self.db.set_setting("stitch_parallelism", str(stitch))
         scan, _ = load("scan_parallelism", DEFAULT_SCAN_CONCURRENCY)
         deep_scan, _ = load("deep_scan_parallelism", DEFAULT_DEEP_SCAN_CONCURRENCY)
+        thumbnails, _ = load("thumbnail_parallelism", DEFAULT_THUMBNAIL_CONCURRENCY)
         LOGGER.info(
-            "Using concurrency stitch=%d scan=%d deep_scan=%d", stitch, scan, deep_scan
+            "Using concurrency stitch=%d scan=%d deep_scan=%d thumbnails=%d",
+            stitch,
+            scan,
+            deep_scan,
+            thumbnails,
         )
-        return stitch, scan, deep_scan
+        return stitch, scan, deep_scan, thumbnails
 
     def _load_expected_ratio(self) -> float:
         stored = self.db.get_setting("expected_size_ratio")
@@ -486,7 +495,12 @@ class AutoStitcher:
         self.set_concurrency(stitch=count)
 
     def set_concurrency(
-        self, *, stitch: Optional[int] = None, scan: Optional[int] = None, deep_scan: Optional[int] = None
+        self,
+        *,
+        stitch: Optional[int] = None,
+        scan: Optional[int] = None,
+        deep_scan: Optional[int] = None,
+        thumbnails: Optional[int] = None,
     ) -> None:
         updates: Dict[str, int] = {}
         with self._lock:
@@ -505,15 +519,21 @@ class AutoStitcher:
                     raise ValueError("deep_scan_parallelism must be >= 1")
                 self.deep_scan_parallelism = deep_scan
                 updates["deep_scan_parallelism"] = deep_scan
+            if thumbnails is not None:
+                if thumbnails < 1:
+                    raise ValueError("thumbnail_parallelism must be >= 1")
+                self.thumbnail_parallelism = thumbnails
+                updates["thumbnail_parallelism"] = thumbnails
         for key, value in updates.items():
             self.db.set_setting(key, str(value))
         if "stitch_parallelism" in updates:
             self._maybe_start_jobs()
         LOGGER.info(
-            "Updated concurrency stitch=%d scan=%d deep_scan=%d",
+            "Updated concurrency stitch=%d scan=%d deep_scan=%d thumbnails=%d",
             self.stitch_parallelism,
             self.scan_parallelism,
             self.deep_scan_parallelism,
+            self.thumbnail_parallelism,
         )
 
     def set_expected_ratio(self, ratio: float) -> None:
@@ -1036,6 +1056,7 @@ class AutoStitcher:
                 "stitch": self.stitch_parallelism,
                 "scan": self.scan_parallelism,
                 "deep_scan": self.deep_scan_parallelism,
+                "thumbnails": self.thumbnail_parallelism,
             },
         }
 
@@ -1061,28 +1082,31 @@ class AutoStitcher:
         generated = 0
         skipped = 0
         failed = 0
-        for row in rows:
+
+        def process_thumbnail(row: sqlite3.Row) -> tuple[int, int, int]:
             thumb = thumbnail_path(row["id"])
             if os.path.exists(thumb):
-                skipped += 1
-                continue
+                return (0, 1, 0)
             sources = json.loads(row["source_files"])
             if not sources:
                 LOGGER.debug("Job %s has no sources; skipping thumbnail", row["id"])
-                failed += 1
-                continue
+                return (0, 0, 1)
             primary = sources[0]
             if not os.path.exists(primary):
                 LOGGER.debug("Primary source %s missing for job %s", primary, row["id"])
-                failed += 1
-                continue
+                return (0, 0, 1)
             duration = video_duration_seconds(primary) or 0
             timestamp = duration / 2 if duration > 0 else 0
             if extract_thumbnail(primary, thumb, timestamp):
-                generated += 1
                 LOGGER.info("Generated thumbnail for job %s at %s", row["id"], thumb)
-            else:
-                failed += 1
+                return (1, 0, 0)
+            return (0, 0, 1)
+
+        with ThreadPoolExecutor(max_workers=self.thumbnail_parallelism) as executor:
+            for gen, skip, fail in executor.map(process_thumbnail, rows):
+                generated += gen
+                skipped += skip
+                failed += fail
         if job_ids:
             LOGGER.info(
                 "Thumbnail generation complete for selected jobs (generated=%d, skipped=%d, failed=%d)",
@@ -1171,6 +1195,7 @@ def create_app(controller: AutoStitcher) -> Flask:
                 "stitch_parallelism": controller.stitch_parallelism,
                 "scan_parallelism": controller.scan_parallelism,
                 "deep_scan_parallelism": controller.deep_scan_parallelism,
+                "thumbnail_parallelism": controller.thumbnail_parallelism,
                 "max_parallel_jobs": controller.stitch_parallelism,
             }
         )
@@ -1183,6 +1208,7 @@ def create_app(controller: AutoStitcher) -> Flask:
             "stitch_parallelism": "stitch",
             "scan_parallelism": "scan",
             "deep_scan_parallelism": "deep_scan",
+            "thumbnail_parallelism": "thumbnails",
         }
         for payload_key, field in mappings.items():
             if payload_key in payload:
@@ -1209,6 +1235,7 @@ def create_app(controller: AutoStitcher) -> Flask:
                 "stitch_parallelism": controller.stitch_parallelism,
                 "scan_parallelism": controller.scan_parallelism,
                 "deep_scan_parallelism": controller.deep_scan_parallelism,
+                "thumbnail_parallelism": controller.thumbnail_parallelism,
                 "max_parallel_jobs": controller.stitch_parallelism,
             }
         )
