@@ -37,6 +37,14 @@ export function stitchSelectedJobs(jobIds: string[]): Promise<{ scheduled: strin
   });
 }
 
+export function generateThumbnailsForJobs(jobIds: string[]): Promise<{ scheduled: string }> {
+  return request<{ scheduled: string }>('/tasks', {
+    method: 'POST',
+    headers,
+    body: JSON.stringify({ action: 'generate_thumbnails', job_ids: jobIds })
+  });
+}
+
 export function updateParallelism(maxParallelJobs: number): Promise<{ max_parallel_jobs: number }> {
   return request<{ max_parallel_jobs: number }>('/settings/parallelism', {
     method: 'POST',

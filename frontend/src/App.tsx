@@ -1,7 +1,13 @@
 import { useEffect, useMemo, useState } from 'react';
 import clsx from 'clsx';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { fetchStatus, stitchSelectedJobs, triggerTask, updateParallelism } from './api';
+import {
+  fetchStatus,
+  generateThumbnailsForJobs,
+  stitchSelectedJobs,
+  triggerTask,
+  updateParallelism
+} from './api';
 import type { Job, TaskAction } from './types';
 import { JobTable } from './components/JobTable';
 import './App.css';
@@ -97,6 +103,12 @@ export default function App() {
     mutationFn: (jobIds: string[]) => stitchSelectedJobs(jobIds),
     onSuccess: () => {
       setSelectedJobs(new Set());
+      queryClient.invalidateQueries({ queryKey: ['status'] });
+    }
+  });
+  const thumbnailsSelectedMutation = useMutation({
+    mutationFn: (jobIds: string[]) => generateThumbnailsForJobs(jobIds),
+    onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['status'] });
     }
   });
@@ -223,15 +235,30 @@ export default function App() {
         <span>
           {selectedJobs.size} selected · {pendingJobs} waiting
         </span>
-        <button
-          type="button"
-          className="primary"
-          onClick={() => stitchSelectedMutation.mutate(Array.from(selectedJobs))}
-          disabled={selectedJobs.size === 0 || stitchSelectedMutation.isPending}
-        >
-          Stitch Selected
-        </button>
+        <div className="selection-buttons">
+          <button
+            type="button"
+            className="ghost"
+            onClick={() => thumbnailsSelectedMutation.mutate(Array.from(selectedJobs))}
+            disabled={selectedJobs.size === 0 || thumbnailsSelectedMutation.isPending}
+          >
+            {thumbnailsSelectedMutation.isPending ? 'Generating…' : 'Thumbnails Selected'}
+          </button>
+          <button
+            type="button"
+            className="primary"
+            onClick={() => stitchSelectedMutation.mutate(Array.from(selectedJobs))}
+            disabled={selectedJobs.size === 0 || stitchSelectedMutation.isPending}
+          >
+            {stitchSelectedMutation.isPending ? 'Stitching…' : 'Stitch Selected'}
+          </button>
+        </div>
       </div>
+      {thumbnailsSelectedMutation.isError && (
+        <div className="panel error">
+          Failed to generate thumbnails: {(thumbnailsSelectedMutation.error as Error)?.message}
+        </div>
+      )}
       {stitchSelectedMutation.isError && (
         <div className="panel error">Failed to stitch selected: {(stitchSelectedMutation.error as Error)?.message}</div>
       )}

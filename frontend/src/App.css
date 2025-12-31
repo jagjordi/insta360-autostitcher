@@ -359,6 +359,14 @@ tr:hover {
   box-shadow: 0 6px 20px rgba(15, 22, 33, 0.08);
 }
 
+.selection-buttons {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+
 .primary {
   border: none;
   border-radius: 10px;

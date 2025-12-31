@@ -719,14 +719,14 @@ class AutoStitcher:
         if action == "full_stitch":
             return self.stitch(include_failed=True)
         if action == "generate_thumbnails":
-            return self.generate_thumbnails()
+            return self.generate_thumbnails(job_ids)
         if action == "stitch_selected":
             return self.stitch_selected(job_ids or [])
         raise ValueError(f"Unknown action: {action}")
 
-    def generate_thumbnails(self) -> Dict[str, int]:
+    def generate_thumbnails(self, job_ids: Optional[List[str]] = None) -> Dict[str, int]:
         os.makedirs(THUMBNAIL_DIR, exist_ok=True)
-        rows = self.db.fetch_jobs()
+        rows = self.db.fetch_jobs_by_ids(job_ids) if job_ids else self.db.fetch_jobs()
         generated = 0
         skipped = 0
         failed = 0
@@ -752,12 +752,20 @@ class AutoStitcher:
                 LOGGER.info("Generated thumbnail for job %s at %s", row["id"], thumb)
             else:
                 failed += 1
-        LOGGER.info(
-            "Thumbnail generation complete (generated=%d, skipped=%d, failed=%d)",
-            generated,
-            skipped,
-            failed,
-        )
+        if job_ids:
+            LOGGER.info(
+                "Thumbnail generation complete for selected jobs (generated=%d, skipped=%d, failed=%d)",
+                generated,
+                skipped,
+                failed,
+            )
+        else:
+            LOGGER.info(
+                "Thumbnail generation complete (generated=%d, skipped=%d, failed=%d)",
+                generated,
+                skipped,
+                failed,
+            )
         return {"generated": generated, "skipped": skipped, "failed": failed}
 
     def stitch_selected(self, job_ids: List[str]) -> Dict[str, int]:
@@ -803,6 +811,14 @@ def create_app(controller: AutoStitcher) -> Flask:
                 LOGGER.warning("Invalid job_ids payload for stitch_selected: %s", job_ids)
                 return jsonify({"error": "job_ids must be a list"}), 400
             job_ids = [str(jid) for jid in job_ids]
+        elif action == "generate_thumbnails":
+            if job_ids is not None and not isinstance(job_ids, list):
+                LOGGER.warning("Invalid job_ids payload for generate_thumbnails: %s", job_ids)
+                return jsonify({"error": "job_ids must be a list"}), 400
+            if isinstance(job_ids, list):
+                job_ids = [str(jid) for jid in job_ids]
+            else:
+                job_ids = None
         else:
             job_ids = None
         LOGGER.info("Scheduling action %s from REST request", action)
