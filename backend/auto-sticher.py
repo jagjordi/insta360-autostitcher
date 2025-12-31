@@ -305,6 +305,15 @@ class JobDatabase:
             row = conn.execute("SELECT * FROM jobs WHERE id = ?", (job_id,)).fetchone()
         return row
 
+    def fetch_jobs_by_ids(self, job_ids: Iterable[str]) -> List[sqlite3.Row]:
+        job_ids = list(job_ids)
+        if not job_ids:
+            return []
+        placeholders = ",".join("?" for _ in job_ids)
+        with closing(self._connect()) as conn:
+            rows = conn.execute(f"SELECT * FROM jobs WHERE id IN ({placeholders})", job_ids).fetchall()
+        return rows
+
     def find_by_final_file(self, final_file: str) -> Optional[sqlite3.Row]:
         with closing(self._connect()) as conn:
             row = conn.execute(
@@ -627,7 +636,7 @@ class AutoStitcher:
             active = list(self._active_threads.keys())
         return {"jobs": jobs, "active_jobs": active}
 
-    def run_action(self, action: str) -> Dict[str, int]:
+    def run_action(self, action: str, job_ids: Optional[List[str]] = None) -> Dict[str, int]:
         LOGGER.info("Running action %s", action)
         if action == "scan":
             return self.scan()
@@ -639,6 +648,8 @@ class AutoStitcher:
             return self.stitch(include_failed=True)
         if action == "generate_thumbnails":
             return self.generate_thumbnails()
+        if action == "stitch_selected":
+            return self.stitch_selected(job_ids or [])
         raise ValueError(f"Unknown action: {action}")
 
     def generate_thumbnails(self) -> Dict[str, int]:
@@ -677,6 +688,25 @@ class AutoStitcher:
         )
         return {"generated": generated, "skipped": skipped, "failed": failed}
 
+    def stitch_selected(self, job_ids: List[str]) -> Dict[str, int]:
+        if not job_ids:
+            LOGGER.info("No job IDs provided for stitch_selected")
+            return {"scheduled": 0}
+        rows = self.db.fetch_jobs_by_ids(job_ids)
+        scheduled = 0
+        allowed_statuses = {STATUS_UNPROCESSED, STATUS_FAILED}
+        for row in rows:
+            if row["status"] not in allowed_statuses:
+                LOGGER.debug(
+                    "Skipping job %s for stitch_selected due to status %s",
+                    row["id"],
+                    row["status"],
+                )
+                continue
+            scheduled += int(self._start_job_thread(row))
+        LOGGER.info("Scheduled %d jobs for stitch_selected", scheduled)
+        return {"scheduled": scheduled}
+
 
 def create_app(controller: AutoStitcher) -> Flask:
     app = Flask(__name__)
@@ -690,11 +720,19 @@ def create_app(controller: AutoStitcher) -> Flask:
     def tasks() -> object:
         payload = request.get_json(silent=True) or {}
         action = payload.get("action")
-        if action not in {"scan", "deep_scan", "stitch", "full_stitch", "generate_thumbnails"}:
+        if action not in {"scan", "deep_scan", "stitch", "full_stitch", "generate_thumbnails", "stitch_selected"}:
             LOGGER.warning("Received invalid task action: %s", action)
             return jsonify({"error": "unknown action"}), 400
+        job_ids = payload.get("job_ids")
+        if action == "stitch_selected":
+            if not isinstance(job_ids, list):
+                LOGGER.warning("Invalid job_ids payload for stitch_selected: %s", job_ids)
+                return jsonify({"error": "job_ids must be a list"}), 400
+            job_ids = [str(jid) for jid in job_ids]
+        else:
+            job_ids = None
         LOGGER.info("Scheduling action %s from REST request", action)
-        threading.Thread(target=controller.run_action, args=(action,), daemon=True).start()
+        threading.Thread(target=controller.run_action, args=(action, job_ids), daemon=True).start()
         return jsonify({"scheduled": action})
 
     @app.get("/thumbnails/<job_id>.jpg")
@@ -741,7 +779,7 @@ def main() -> None:
     )
     parser.add_argument(
         "command",
-        choices=["serve", "scan", "deep_scan", "stitch", "full_stitch", "generate_thumbnails"],
+        choices=["serve", "scan", "deep_scan", "stitch", "full_stitch", "generate_thumbnails", "stitch_selected"],
         nargs="?",
         default="serve",
         help="Run as REST server (default) or execute a one-off command",

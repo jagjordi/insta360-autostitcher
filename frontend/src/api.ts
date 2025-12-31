@@ -28,3 +28,11 @@ export function triggerTask(action: TaskAction): Promise<{ scheduled: string }> 
     body: JSON.stringify({ action })
   });
 }
+
+export function stitchSelectedJobs(jobIds: string[]): Promise<{ scheduled: string }> {
+  return request<{ scheduled: string }>('/tasks', {
+    method: 'POST',
+    headers,
+    body: JSON.stringify({ action: 'stitch_selected', job_ids: jobIds })
+  });
+}

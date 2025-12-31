@@ -1,10 +1,13 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import clsx from 'clsx';
 import type { Job } from '../types';
 
 interface JobTableProps {
   jobs: Job[];
   isLoading: boolean;
+  selectedJobs: Set<string>;
+  onToggleJob: (jobId: string, selected: boolean) => void;
+  onTogglePage: (jobIds: string[], selected: boolean) => void;
 }
 
 const PAGE_SIZES = [10, 25, 50, 100];
@@ -54,11 +57,12 @@ const formatDate = (timestamp: string) => {
   }
 };
 
-export function JobTable({ jobs, isLoading }: JobTableProps) {
+export function JobTable({ jobs, isLoading, selectedJobs, onToggleJob, onTogglePage }: JobTableProps) {
   const [pageSize, setPageSize] = useState(PAGE_SIZES[0]);
   const [page, setPage] = useState(0);
   const [sortKey, setSortKey] = useState<SortKey>('timestamp');
   const [sortDir, setSortDir] = useState<'asc' | 'desc'>('desc');
+  const headerCheckboxRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     setPage(0);
@@ -93,6 +97,15 @@ export function JobTable({ jobs, isLoading }: JobTableProps) {
   const start = page * pageSize;
   const end = Math.min(start + pageSize, sortedJobs.length);
   const paginatedJobs = sortedJobs.slice(start, end);
+  const pageIds = paginatedJobs.map((job) => job.id);
+  const allVisibleSelected = pageIds.length > 0 && pageIds.every((id) => selectedJobs.has(id));
+  const someVisibleSelected = pageIds.some((id) => selectedJobs.has(id)) && !allVisibleSelected;
+
+  useEffect(() => {
+    if (headerCheckboxRef.current) {
+      headerCheckboxRef.current.indeterminate = someVisibleSelected;
+    }
+  }, [someVisibleSelected, allVisibleSelected, pageIds.length]);
 
   const visiblePages = useMemo(() => {
     if (totalPages <= 7) {
@@ -161,6 +174,16 @@ export function JobTable({ jobs, isLoading }: JobTableProps) {
         <table>
           <thead>
             <tr>
+              <th className="select-column">
+                <input
+                  ref={headerCheckboxRef}
+                  type="checkbox"
+                  className="select-checkbox"
+                  checked={allVisibleSelected}
+                  onChange={(event) => onTogglePage(pageIds, event.target.checked)}
+                  aria-label="Select visible jobs"
+                />
+              </th>
               <th>Preview</th>
               <th>Timestamp</th>
               <th>Status</th>
@@ -178,6 +201,15 @@ export function JobTable({ jobs, isLoading }: JobTableProps) {
               );
               return (
                 <tr key={job.id}>
+                  <td className="select-column">
+                    <input
+                      type="checkbox"
+                      className="select-checkbox"
+                      checked={selectedJobs.has(job.id)}
+                      onChange={(event) => onToggleJob(job.id, event.target.checked)}
+                      aria-label={`Select job ${job.timestamp}`}
+                    />
+                  </td>
                   <td>
                     {job.thumbnail_url ? (
                       <img className="thumbnail" src={job.thumbnail_url} alt={`Thumbnail for ${job.timestamp}`} />

@@ -40,6 +40,8 @@ If you run the controller directly outside of Docker you can still override the 
 ## Web dashboard
 A minimal React + TypeScript dashboard lives in `frontend/` to show job progress and trigger scans or stitch runs without touching the CLI.
 
+The job table supports pagination, sorting, and multi-select checkboxes. Select one or more rows and click “Stitch Selected” to queue only those jobs; thumbnails (generated via the backend action) are displayed alongside each entry when available.
+
 ### Getting started
 ```bash
 cd frontend

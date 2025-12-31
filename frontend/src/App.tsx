@@ -1,7 +1,7 @@
-import { useMemo } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import clsx from 'clsx';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { fetchStatus, triggerTask } from './api';
+import { fetchStatus, stitchSelectedJobs, triggerTask } from './api';
 import type { Job, TaskAction } from './types';
 import { JobTable } from './components/JobTable';
 import './App.css';
@@ -63,6 +63,28 @@ export default function App() {
   });
 
   const jobs = statusQuery.data?.jobs ?? [];
+  const [selectedJobs, setSelectedJobs] = useState<Set<string>>(new Set());
+
+  useEffect(() => {
+    setSelectedJobs((prev) => {
+      const validIds = new Set(jobs.map((job) => job.id));
+      const next = new Set<string>();
+      prev.forEach((id) => {
+        if (validIds.has(id)) {
+          next.add(id);
+        }
+      });
+      return next.size === prev.size ? prev : next;
+    });
+  }, [jobs]);
+
+  const stitchSelectedMutation = useMutation({
+    mutationFn: (jobIds: string[]) => stitchSelectedJobs(jobIds),
+    onSuccess: () => {
+      setSelectedJobs(new Set());
+      queryClient.invalidateQueries({ queryKey: ['status'] });
+    }
+  });
   const summary = useMemo(() => summarizeJobs(jobs), [jobs]);
   const activeJobs = statusQuery.data?.active_jobs ?? [];
   const lastUpdated = statusQuery.dataUpdatedAt ? new Date(statusQuery.dataUpdatedAt).toLocaleTimeString() : '—';
@@ -135,7 +157,49 @@ export default function App() {
         <div className="panel error">Failed to load status: {(statusQuery.error as Error)?.message}</div>
       )}
 
-      <JobTable jobs={jobs} isLoading={statusQuery.isLoading} />
+      <JobTable
+        jobs={jobs}
+        isLoading={statusQuery.isLoading}
+        selectedJobs={selectedJobs}
+        onToggleJob={(jobId, selected) =>
+          setSelectedJobs((prev) => {
+            const next = new Set(prev);
+            if (selected) {
+              next.add(jobId);
+            } else {
+              next.delete(jobId);
+            }
+            return next;
+          })
+        }
+        onTogglePage={(jobIds, selected) =>
+          setSelectedJobs((prev) => {
+            const next = new Set(prev);
+            jobIds.forEach((id) => {
+              if (selected) {
+                next.add(id);
+              } else {
+                next.delete(id);
+              }
+            });
+            return next;
+          })
+        }
+      />
+      <div className="selection-actions">
+        <span>{selectedJobs.size} selected</span>
+        <button
+          type="button"
+          className="primary"
+          onClick={() => stitchSelectedMutation.mutate(Array.from(selectedJobs))}
+          disabled={selectedJobs.size === 0 || stitchSelectedMutation.isPending}
+        >
+          Stitch Selected
+        </button>
+      </div>
+      {stitchSelectedMutation.isError && (
+        <div className="panel error">Failed to stitch selected: {(stitchSelectedMutation.error as Error)?.message}</div>
+      )}
     </div>
   );
 }
