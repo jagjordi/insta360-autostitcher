@@ -488,12 +488,20 @@ class AutoStitcher:
             if not stitched_size:
                 continue
             ratios.append(stitched_size / base_size)
-        if not ratios:
+        count = len(ratios)
+        if not count:
             raise ValueError("No completed jobs available to compute ratio")
-        avg_ratio = sum(ratios) / len(ratios)
+        avg_ratio = sum(ratios) / count
+        variance = sum((value - avg_ratio) ** 2 for value in ratios) / count
+        std_dev = variance ** 0.5
         self.set_expected_ratio(avg_ratio)
-        LOGGER.info("Computed expected_size_ratio=%.4f from %d completed jobs", avg_ratio, len(ratios))
-        return avg_ratio
+        LOGGER.info(
+            "Computed expected_size_ratio=%.4f (std=%.4f) from %d completed jobs",
+            avg_ratio,
+            std_dev,
+            count,
+        )
+        return avg_ratio, std_dev
 
     # ------------------------------ Discovery ------------------------------
     def discover_candidates(self) -> List[JobCandidate]:
@@ -978,10 +986,10 @@ def create_app(controller: AutoStitcher) -> Flask:
     @app.post("/settings/ratio/compute")
     def compute_ratio() -> object:
         try:
-            ratio = controller.compute_expected_ratio()
+            ratio, std_dev = controller.compute_expected_ratio()
         except ValueError as exc:
             return jsonify({"error": str(exc)}), 400
-        return jsonify({"expected_size_ratio": ratio})
+        return jsonify({"expected_size_ratio": ratio, "std_dev": std_dev})
 
     return app
 
