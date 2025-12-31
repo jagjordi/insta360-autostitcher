@@ -29,5 +29,3 @@ services:
     environment:
       NGINX_PORT: ${FRONTEND_PORT:-3000}
       API_PROXY_TARGET: ${BACKEND_API_URL:-http://127.0.0.1:8000}
-    environment:
-      NGINX_PORT: ${FRONTEND_PORT:-3000}
