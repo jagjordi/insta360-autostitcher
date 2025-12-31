@@ -6,6 +6,7 @@ export interface Job {
   final_file: string;
   source_files: string[];
   status: JobStatus;
+  queue_state?: 'queued' | 'pending' | null;
   pid: number | null;
   stitched_size: number;
   process: number;
@@ -19,6 +20,7 @@ export interface StatusResponse {
   jobs: Job[];
   active_jobs: string[];
   pending_jobs: number;
+  queued_jobs: number;
   max_parallel_jobs: number;
   expected_size_ratio: number;
   stitch_settings: {

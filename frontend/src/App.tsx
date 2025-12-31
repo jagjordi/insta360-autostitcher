@@ -156,6 +156,7 @@ export default function App() {
   });
   const summary = useMemo(() => summarizeJobs(jobs), [jobs]);
   const activeJobs = statusQuery.data?.active_jobs ?? [];
+  const queuedJobs = statusQuery.data?.queued_jobs ?? statusQuery.data?.pending_jobs ?? 0;
   const pendingJobs = statusQuery.data?.pending_jobs ?? 0;
   const maxParallelJobs = statusQuery.data?.max_parallel_jobs ?? 1;
   const expectedRatio = statusQuery.data?.expected_size_ratio ?? 1;
@@ -255,7 +256,8 @@ export default function App() {
       <section className="panel summary">
         <h2>Job Summary</h2>
         <div className="summary-grid">
-          <SummaryCard label="Queued" value={summary.unprocessed} tone="queued" />
+          <SummaryCard label="Queued" value={queuedJobs} tone="queued" />
+          <SummaryCard label="Pending" value={pendingJobs} tone="pending" />
           <SummaryCard label="Processing" value={summary.processing} tone="running" />
           <SummaryCard label="Finished" value={summary.processed} tone="success" />
           <SummaryCard label="Failed" value={summary.failed} tone="failed" />
@@ -269,6 +271,7 @@ export default function App() {
       <SelectionActions
         selectedCount={selectedJobs.size}
         pendingJobs={pendingJobs}
+        queuedJobs={queuedJobs}
         onGenerate={() => thumbnailsSelectedMutation.mutate(Array.from(selectedJobs))}
         onStitch={() => stitchSelectedMutation.mutate(Array.from(selectedJobs))}
         isGenerating={thumbnailsSelectedMutation.isPending}
@@ -308,6 +311,7 @@ export default function App() {
       <SelectionActions
         selectedCount={selectedJobs.size}
         pendingJobs={pendingJobs}
+        queuedJobs={queuedJobs}
         onGenerate={() => thumbnailsSelectedMutation.mutate(Array.from(selectedJobs))}
         onStitch={() => stitchSelectedMutation.mutate(Array.from(selectedJobs))}
         isGenerating={thumbnailsSelectedMutation.isPending}
@@ -487,7 +491,7 @@ function summarizeJobs(jobs: Job[]) {
 interface SummaryCardProps {
   label: string;
   value: number;
-  tone: 'queued' | 'running' | 'success' | 'failed';
+  tone: 'queued' | 'pending' | 'running' | 'success' | 'failed';
 }
 
 function SummaryCard({ label, value, tone }: SummaryCardProps) {
@@ -502,6 +506,7 @@ function SummaryCard({ label, value, tone }: SummaryCardProps) {
 interface SelectionActionsProps {
   selectedCount: number;
   pendingJobs: number;
+  queuedJobs: number;
   onGenerate: () => void;
   onStitch: () => void;
   isGenerating: boolean;
@@ -512,6 +517,7 @@ interface SelectionActionsProps {
 function SelectionActions({
   selectedCount,
   pendingJobs,
+  queuedJobs,
   onGenerate,
   onStitch,
   isGenerating,
@@ -521,7 +527,7 @@ function SelectionActions({
   return (
     <div className="selection-actions">
       <span>
-        {selectedCount} selected · {pendingJobs} waiting
+        {selectedCount} selected · {queuedJobs} queued · {pendingJobs} pending
       </span>
       <div className="selection-buttons">
         <button type="button" className="ghost" onClick={onGenerate} disabled={disabled || isGenerating}>

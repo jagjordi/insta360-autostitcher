@@ -1038,12 +1038,24 @@ class AutoStitcher:
     def get_status(self) -> Dict[str, object]:
         jobs = [self.serialize_job(row) for row in self.db.fetch_jobs()]
         with self._lock:
-            active = list(self._active_threads.keys())
-            pending = len(self._pending_jobs)
+            active_ids = set(self._active_threads.keys())
+            queued_ids = set(self._pending_job_ids)
+        eligible_statuses = {STATUS_UNPROCESSED, STATUS_FAILED}
+        queued_jobs = len(queued_ids)
+        waiting_jobs = 0
+        for job in jobs:
+            if job["id"] in queued_ids:
+                job["queue_state"] = "queued"
+            elif job["status"] in eligible_statuses and job["id"] not in active_ids:
+                job["queue_state"] = "pending"
+                waiting_jobs += 1
+            else:
+                job["queue_state"] = None
         return {
             "jobs": jobs,
-            "active_jobs": active,
-            "pending_jobs": pending,
+            "active_jobs": list(active_ids),
+            "pending_jobs": waiting_jobs,
+            "queued_jobs": queued_jobs,
             "max_parallel_jobs": self.stitch_parallelism,
             "expected_size_ratio": self.expected_size_ratio,
             "stitch_settings": {

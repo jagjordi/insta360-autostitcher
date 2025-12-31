@@ -37,6 +37,16 @@ const statusClasses: Record<Job['status'], string> = {
   failed: 'status-badge failed'
 };
 
+const queueStateLabels: Record<'queued' | 'pending', string> = {
+  queued: 'Queued',
+  pending: 'Pending'
+};
+
+const queueStateClasses: Record<'queued' | 'pending', string> = {
+  queued: 'status-badge queued',
+  pending: 'status-badge pending'
+};
+
 const PREVIEW_SIZE = 512;
 const PREVIEW_GAP = 12;
 
@@ -262,6 +272,9 @@ export function JobTable({
                 Math.min(100, Math.round((job.process ?? 0) * 100))
               );
               const selectable = selectableStatuses.has(job.status);
+              const queueState = job.queue_state ?? null;
+              const badgeClass = queueState ? queueStateClasses[queueState] : statusClasses[job.status];
+              const badgeLabel = queueState ? queueStateLabels[queueState] : statusLabels[job.status];
               return (
                 <tr key={job.id}>
                   <td className="select-column">
@@ -283,8 +296,8 @@ export function JobTable({
                   </td>
                   <td className="mono">{job.timestamp}</td>
                   <td>
-                    <span className={clsx(statusClasses[job.status])}>
-                      {statusLabels[job.status]}
+                    <span className={clsx(badgeClass)}>
+                      {badgeLabel}
                     </span>
                   </td>
                   <td>

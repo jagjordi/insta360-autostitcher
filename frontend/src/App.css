@@ -117,6 +117,10 @@
   border: 1px solid #95a4ff;
 }
 
+.summary-card.pending {
+  border: 1px solid #b0c5ff;
+}
+
 .summary-card.running {
   border: 1px solid #ffb347;
 }
@@ -248,6 +252,11 @@ tr:hover {
 .status-badge.failed {
   background: #ffe9e9;
   color: #d64545;
+}
+
+.status-badge.pending {
+  background: #f1f5ff;
+  color: #6480ea;
 }
 
 .select-column {
