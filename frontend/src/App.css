@@ -268,6 +268,33 @@ tr:hover {
   background: #f7f8fc;
 }
 
+.thumbnail-wrapper {
+  position: relative;
+  display: inline-block;
+}
+
+.thumbnail-preview {
+  position: absolute;
+  top: 0;
+  left: calc(100% + 0.75rem);
+  width: 512px;
+  height: 512px;
+  object-fit: cover;
+  border-radius: 16px;
+  border: 1px solid #dfe3eb;
+  background: #fff;
+  box-shadow: 0 12px 30px rgba(15, 22, 33, 0.2);
+  opacity: 0;
+  transform-origin: top left;
+  transition: opacity 0.15s ease;
+  z-index: 10;
+  pointer-events: none;
+}
+
+.thumbnail-wrapper:hover .thumbnail-preview {
+  opacity: 1;
+}
+
 .progress {
   height: 6px;
   border-radius: 999px;

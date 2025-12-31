@@ -227,7 +227,19 @@ export function JobTable({
                   </td>
                   <td>
                     {job.thumbnail_url ? (
-                      <img className="thumbnail" src={job.thumbnail_url} alt={`Thumbnail for ${job.timestamp}`} />
+                      <div className="thumbnail-wrapper">
+                        <img
+                          className="thumbnail"
+                          src={job.thumbnail_url}
+                          alt={`Thumbnail for ${job.timestamp}`}
+                        />
+                        <img
+                          className="thumbnail-preview"
+                          src={job.thumbnail_url}
+                          alt=""
+                          aria-hidden="true"
+                        />
+                      </div>
                     ) : (
                       <span className="muted">None</span>
                     )}
