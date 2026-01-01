@@ -50,6 +50,29 @@ const queueStateClasses: Record<'queued' | 'pending', string> = {
 const PREVIEW_SIZE = 512;
 const PREVIEW_GAP = 12;
 
+const formatEta = (seconds: number | null | undefined): string => {
+  if (!seconds || !Number.isFinite(seconds) || seconds <= 0) {
+    return '—';
+  }
+  const total = Math.round(seconds);
+  const hours = Math.floor(total / 3600);
+  const minutes = Math.floor((total % 3600) / 60);
+  const secs = total % 60;
+  if (hours > 0) {
+    return `${hours}h ${minutes}m`;
+  }
+  if (minutes > 0) {
+    return `${minutes}m ${secs}s`;
+  }
+  return `${secs}s`;
+};
+
+interface EtaSample {
+  process: number;
+  timestamp: number;
+  eta: number | null;
+}
+
 function ThumbnailCell({ url, alt }: { url: string; alt: string }) {
   const wrapperRef = useRef<HTMLDivElement>(null);
   const [previewPos, setPreviewPos] = useState<{ top: number; left: number } | null>(null);
@@ -130,6 +153,7 @@ export function JobTable({
   const [sortKey, setSortKey] = useState<SortKey>('timestamp');
   const [sortDir, setSortDir] = useState<'asc' | 'desc'>('desc');
   const headerCheckboxRef = useRef<HTMLInputElement>(null);
+  const etaRef = useRef<Map<string, EtaSample>>(new Map());
 
   useEffect(() => {
     setPage(0);
@@ -177,6 +201,41 @@ export function JobTable({
       headerCheckboxRef.current.indeterminate = someVisibleSelected;
     }
   }, [someVisibleSelected, allVisibleSelected, selectablePageIds.length]);
+
+  useEffect(() => {
+    const map = new Map(etaRef.current);
+    const now = Date.now();
+    const seen = new Set<string>();
+    jobs.forEach((job) => {
+      seen.add(job.id);
+      const updatedAt = Date.parse(job.updated_at ?? '') || now;
+      const prev = map.get(job.id);
+      const processValue = job.process ?? 0;
+      if (job.status !== 'processing' || processValue <= 0) {
+        map.set(job.id, { process: processValue, timestamp: updatedAt, eta: null });
+        return;
+      }
+      if (prev && prev.timestamp === updatedAt) {
+        return;
+      }
+      if (prev && processValue > prev.process && updatedAt > prev.timestamp) {
+        const deltaProcess = processValue - prev.process;
+        const deltaTime = (updatedAt - prev.timestamp) / 1000;
+        const rate = deltaTime > 0 ? deltaProcess / deltaTime : 0;
+        const remaining = Math.max(0, 1 - processValue);
+        const eta = rate > 0 ? remaining / rate : prev.eta ?? null;
+        map.set(job.id, { process: processValue, timestamp: updatedAt, eta });
+      } else {
+        map.set(job.id, { process: processValue, timestamp: updatedAt, eta: prev?.eta ?? null });
+      }
+    });
+    for (const id of Array.from(map.keys())) {
+      if (!seen.has(id)) {
+        map.delete(id);
+      }
+    }
+    etaRef.current = map;
+  }, [jobs]);
 
   const visiblePages = useMemo(() => {
     if (totalPages <= 7) {
@@ -260,6 +319,7 @@ export function JobTable({
               <th>Timestamp</th>
               <th>Status</th>
               <th>Progress</th>
+              <th>ETA</th>
               <th>Output</th>
               <th>PID</th>
               <th>Updated</th>
@@ -275,6 +335,7 @@ export function JobTable({
               const queueState = job.queue_state ?? null;
               const badgeClass = queueState ? queueStateClasses[queueState] : statusClasses[job.status];
               const badgeLabel = queueState ? queueStateLabels[queueState] : statusLabels[job.status];
+              const etaEntry = etaRef.current.get(job.id);
               return (
                 <tr key={job.id}>
                   <td className="select-column">
@@ -308,6 +369,7 @@ export function JobTable({
                       {formatBytes(job.stitched_size)} / {formatBytes(job.expected_size)} ({percent}% )
                     </small>
                   </td>
+                  <td className="mono">{formatEta(etaEntry?.eta)}</td>
                   <td>
                     <div className="mono">{job.final_file}</div>
                   </td>
