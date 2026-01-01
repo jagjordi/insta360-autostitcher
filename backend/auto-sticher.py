@@ -907,6 +907,7 @@ class AutoStitcher:
                     LOGGER.warning("Job %s source files have mismatched sizes", job_id)
                     return
             final_file = row["final_file"]
+            temp_output = f"{final_file}.{uuid.uuid4()}.tmp"
             log_file = log_path(row["timestamp"])
             LOGGER.info("Job %s starting stitch to %s", job_id, final_file)
             output_size_value = self.output_size or DEFAULT_OUTPUT_SIZE
@@ -929,7 +930,7 @@ class AutoStitcher:
                 "-stitch_type",
                 self.stitch_type,
                 "-output",
-                final_file,
+                temp_output,
             ]
             if self.debug_mode:
                 LOGGER.info("Debug mode enabled; suppressing MediaSDKTest execution for job %s", job_id)
@@ -964,19 +965,49 @@ class AutoStitcher:
             finally:
                 process.wait()
                 self._refresh_progress(job_id)
-                output_size = os.path.getsize(final_file) if os.path.exists(final_file) else 0
+                output_size = os.path.getsize(temp_output) if os.path.exists(temp_output) else 0
                 expected_size = self._expected_size(job_id)
                 ratio = min(output_size / expected_size, 1.0) if expected_size else 0
-                status = (
-                    STATUS_PROCESSED
-                    if process.returncode == 0 and ratio >= MIN_SUCCESS_RATIO
-                    else STATUS_FAILED
-                )
+                status = STATUS_FAILED
+                if process.returncode == 0 and ratio >= MIN_SUCCESS_RATIO and os.path.exists(temp_output):
+                    timestamp_iso = row["timestamp"]
+                    try:
+                        datetime.fromisoformat(timestamp_iso)
+                    except ValueError:
+                        timestamp_iso = row["timestamp"].replace(" ", "T")
+                    ffmpeg_cmd = [
+                        "ffmpeg",
+                        "-y",
+                        "-i",
+                        temp_output,
+                        "-c",
+                        "copy",
+                        "-map",
+                        "0",
+                        "-metadata",
+                        f"creation_time={timestamp_iso}",
+                        final_file,
+                    ]
+                    ffmpeg_proc = subprocess.run(ffmpeg_cmd, capture_output=True)  # noqa: S603
+                    if ffmpeg_proc.returncode != 0:
+                        LOGGER.error(
+                            "ffmpeg metadata injection failed for job %s: %s",
+                            job_id,
+                            ffmpeg_proc.stderr.decode(errors="ignore"),
+                        )
+                        status = STATUS_FAILED
+                    else:
+                        status = STATUS_PROCESSED
+                if status == STATUS_FAILED and os.path.exists(temp_output):
+                    try:
+                        os.remove(temp_output)
+                    except OSError:
+                        LOGGER.warning("Failed to remove temp output %s for job %s", temp_output, job_id)
                 self.db.update_job(
                     job_id,
                     status=status,
                     pid=None,
-                    stitched_size=output_size,
+                    stitched_size=os.path.getsize(final_file) if os.path.exists(final_file) else output_size,
                     process=ratio,
                 )
                 LOGGER.info(
