@@ -426,6 +426,7 @@ class AutoStitcher:
         self._active_threads: Dict[str, threading.Thread] = {}
         self._pending_jobs: Deque[str] = deque()
         self._pending_job_ids: Set[str] = set()
+        self._job_temp_outputs: Dict[str, str] = {}
         self.debug_mode = debug
         (
             self.stitch_parallelism,
@@ -953,6 +954,7 @@ class AutoStitcher:
             os.makedirs(os.path.dirname(log_file), exist_ok=True)
             with open(log_file, "w") as log_handle:
                 process = subprocess.Popen(cmd, stdout=log_handle, stderr=log_handle)
+            self._job_temp_outputs[job_id] = temp_output
             self.db.update_job(job_id, status=STATUS_PROCESSING, pid=process.pid)
             LOGGER.debug("Job %s running process %d", job_id, process.pid)
             try:
@@ -1003,6 +1005,11 @@ class AutoStitcher:
                         os.remove(temp_output)
                     except OSError:
                         LOGGER.warning("Failed to remove temp output %s for job %s", temp_output, job_id)
+                elif status == STATUS_PROCESSED and os.path.exists(temp_output):
+                    try:
+                        os.remove(temp_output)
+                    except OSError:
+                        LOGGER.warning("Failed to remove temp output %s after success for job %s", temp_output, job_id)
                 self.db.update_job(
                     job_id,
                     status=status,
@@ -1020,16 +1027,19 @@ class AutoStitcher:
         finally:
             with self._lock:
                 self._active_threads.pop(job_id, None)
+            self._job_temp_outputs.pop(job_id, None)
             self._maybe_start_jobs()
 
     def _refresh_progress(self, job_id: str) -> None:
         row = self.db.fetch_job(job_id)
         if not row:
             return
-        final_file = row["final_file"]
-        if not os.path.exists(final_file):
+        with self._lock:
+            temp_path = self._job_temp_outputs.get(job_id)
+        candidate = temp_path if temp_path and os.path.exists(temp_path) else row["final_file"]
+        if not os.path.exists(candidate):
             return
-        output_size = os.path.getsize(final_file)
+        output_size = os.path.getsize(candidate)
         expected = self._expected_size(job_id)
         ratio = min(output_size / expected, 1.0) if expected else 0
         self.db.update_job(
