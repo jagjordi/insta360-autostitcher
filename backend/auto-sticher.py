@@ -55,6 +55,7 @@ DEFAULT_AUTO_RESOLUTION = os.getenv("AUTO_RESOLUTION", "0").lower() in {
     "yes",
     "on",
 }
+MIN_SUCCESS_RATIO = 0.5
 SCAN_INTERVAL = int(os.getenv("SCAN_INTERVAL", "600"))
 REST_PORT = int(os.getenv("AUTO_STITCHER_PORT", "8000"))
 LOG_LEVEL = os.getenv("AUTO_STITCHER_LOG_LEVEL", "INFO")
@@ -812,12 +813,10 @@ class AutoStitcher:
             if missing_sources:
                 new_status = STATUS_FAILED
             elif output_size:
-                if ratio >= 1.0:
+                if ratio >= MIN_SUCCESS_RATIO:
                     new_status = STATUS_PROCESSED
-                elif ratio <= 0.05:
-                    new_status = STATUS_FAILED
                 else:
-                    new_status = STATUS_PROCESSING
+                    new_status = STATUS_UNPROCESSED
             else:
                 new_status = STATUS_UNPROCESSED
             fields: Dict[str, object] = {
@@ -968,7 +967,11 @@ class AutoStitcher:
                 output_size = os.path.getsize(final_file) if os.path.exists(final_file) else 0
                 expected_size = self._expected_size(job_id)
                 ratio = min(output_size / expected_size, 1.0) if expected_size else 0
-                status = STATUS_PROCESSED if process.returncode == 0 and ratio >= 1.0 else STATUS_FAILED
+                status = (
+                    STATUS_PROCESSED
+                    if process.returncode == 0 and ratio >= MIN_SUCCESS_RATIO
+                    else STATUS_FAILED
+                )
                 self.db.update_job(
                     job_id,
                     status=status,
