@@ -1234,6 +1234,15 @@ class AutoStitcher:
 def create_app(controller: AutoStitcher) -> Flask:
     app = Flask(__name__)
 
+    @app.before_request
+    def log_request() -> None:
+        LOGGER.debug(">> %s %s", request.method, request.path)
+
+    @app.after_request
+    def log_response(response):
+        LOGGER.debug("<< %s %s %s", request.method, request.path, response.status)
+        return response
+
     @app.get("/status")
     def status() -> object:
         LOGGER.debug("Status endpoint queried")
