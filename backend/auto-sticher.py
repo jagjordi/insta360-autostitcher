@@ -926,13 +926,17 @@ class AutoStitcher:
                 *sources,
                 "-output_size",
                 output_size_value,
-                "-bitrate",
-                self.bitrate,
-                "-stitch_type",
-                self.stitch_type,
-                "-output",
-                temp_output,
             ]
+            if self.bitrate:
+                cmd.extend(["-bitrate", self.bitrate])
+            cmd.extend(
+                [
+                    "-stitch_type",
+                    self.stitch_type,
+                    "-output",
+                    temp_output,
+                ]
+            )
             if self.debug_mode:
                 LOGGER.info("Debug mode enabled; suppressing MediaSDKTest execution for job %s", job_id)
                 LOGGER.debug("Suppressed command: %s", " ".join(cmd))

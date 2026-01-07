@@ -428,7 +428,7 @@ export default function App() {
               disabled={settingsMutation.isPending || autoResolution}
               placeholder={autoResolution ? 'Auto: 2×input width × input height' : 'e.g. 5760x2880'}
             />
-            <label htmlFor="bitrate-input">Bitrate</label>
+            <label htmlFor="bitrate-input">Bitrate (leave blank to match input)</label>
             <input
               id="bitrate-input"
               type="text"
