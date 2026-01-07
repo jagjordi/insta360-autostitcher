@@ -86,6 +86,7 @@ export default function App() {
   const [bitrateValue, setBitrateValue] = useState('');
   const [stitchTypeValue, setStitchTypeValue] = useState('');
   const [autoResolution, setAutoResolution] = useState(false);
+  const [originalBitrate, setOriginalBitrate] = useState(false);
 
   useEffect(() => {
     setSelectedJobs((prev) => {
@@ -123,7 +124,8 @@ export default function App() {
           output_size: sanitizedOutput,
           bitrate: sanitizedBitrate,
           stitch_type: sanitizedStitchType,
-          auto_resolution: autoResolution
+          auto_resolution: autoResolution,
+          original_bitrate: originalBitrate
         })
       ]);
     },
@@ -178,6 +180,7 @@ export default function App() {
       setStitchTypeValue(stitchSettings?.stitch_type ?? '');
       setAutoResolution(stitchSettings?.auto_resolution ?? false);
       setThumbnailConcurrencyValue(thumbnailConcurrency);
+      setOriginalBitrate(stitchSettings?.original_bitrate ?? false);
     }
   }, [
     settingsOpen,
@@ -434,8 +437,26 @@ export default function App() {
               type="text"
               value={bitrateValue}
               onChange={(event) => setBitrateValue(event.target.value)}
-              disabled={settingsMutation.isPending}
+              disabled={settingsMutation.isPending || originalBitrate}
             />
+            <div className="checkbox-row">
+              <label htmlFor="original-bitrate">
+                <input
+                  id="original-bitrate"
+                  type="checkbox"
+                  checked={originalBitrate}
+                  onChange={(event) => {
+                    const checked = event.target.checked;
+                    setOriginalBitrate(checked);
+                    if (checked) {
+                      setBitrateValue('');
+                    }
+                  }}
+                  disabled={settingsMutation.isPending}
+                />
+                Use original bitrate (match input file)
+              </label>
+            </div>
             <label htmlFor="stitch-type-input">Stitch type</label>
             <input
               id="stitch-type-input"

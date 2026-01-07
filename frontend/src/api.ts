@@ -80,8 +80,21 @@ export function updateStitchSettings(settings: {
   bitrate: string;
   stitch_type: string;
   auto_resolution: boolean;
-}): Promise<{ output_size: string; bitrate: string; stitch_type: string; auto_resolution: boolean }> {
-  return request<{ output_size: string; bitrate: string; stitch_type: string; auto_resolution: boolean }>(
+  original_bitrate: boolean;
+}): Promise<{
+  output_size: string;
+  bitrate: string;
+  stitch_type: string;
+  auto_resolution: boolean;
+  original_bitrate: boolean;
+}> {
+  return request<{
+    output_size: string;
+    bitrate: string;
+    stitch_type: string;
+    auto_resolution: boolean;
+    original_bitrate: boolean;
+  }>(
     '/settings/stitch',
     {
       method: 'POST',

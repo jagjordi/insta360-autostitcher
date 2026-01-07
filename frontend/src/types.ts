@@ -28,6 +28,7 @@ export interface StatusResponse {
     bitrate: string;
     stitch_type: string;
     auto_resolution: boolean;
+    original_bitrate: boolean;
   };
   concurrency?: {
     stitch: number;

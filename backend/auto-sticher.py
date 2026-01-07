@@ -48,6 +48,12 @@ if DEFAULT_EXPECTED_RATIO <= 0:
     DEFAULT_EXPECTED_RATIO = 1.0
 DEFAULT_OUTPUT_SIZE = os.getenv("OUTPUT_SIZE", "5760x2880")
 DEFAULT_BITRATE = os.getenv("BITRATE", "200000000")
+DEFAULT_ORIGINAL_BITRATE = os.getenv("ORIGINAL_BITRATE", "0").lower() in {
+    "1",
+    "true",
+    "yes",
+    "on",
+}
 DEFAULT_STITCH_TYPE = os.getenv("STITCH_TYPE", "dynamicstitch")
 DEFAULT_AUTO_RESOLUTION = os.getenv("AUTO_RESOLUTION", "0").lower() in {
     "1",
@@ -440,6 +446,7 @@ class AutoStitcher:
             self.bitrate,
             self.stitch_type,
             self.auto_resolution,
+            self.original_bitrate,
         ) = self._load_stitch_settings()
         LOGGER.info(
             "AutoStitcher initialized with DB at %s (debug=%s)", DATABASE_PATH, self.debug_mode
@@ -547,7 +554,7 @@ class AutoStitcher:
         LOGGER.info("Updated expected_size_ratio to %.4f", ratio)
         threading.Thread(target=self.recalculate_expected_sizes, daemon=True).start()
 
-    def _load_stitch_settings(self) -> tuple[str, str, str, bool]:
+    def _load_stitch_settings(self) -> tuple[str, str, str, bool, bool]:
         output_size = self.db.get_setting("output_size") or DEFAULT_OUTPUT_SIZE
         bitrate = self.db.get_setting("bitrate") or DEFAULT_BITRATE
         stitch_type = self.db.get_setting("stitch_type") or DEFAULT_STITCH_TYPE
@@ -555,27 +562,42 @@ class AutoStitcher:
         auto_resolution = (
             auto_raw.lower() in {"1", "true", "yes", "on"} if auto_raw else DEFAULT_AUTO_RESOLUTION
         )
+        bitrate_mode_raw = self.db.get_setting("original_bitrate")
+        original_bitrate = (
+            bitrate_mode_raw.lower() in {"1", "true", "yes", "on"}
+            if bitrate_mode_raw
+            else DEFAULT_ORIGINAL_BITRATE
+        )
         self.db.set_setting("output_size", output_size)
         self.db.set_setting("bitrate", bitrate)
         self.db.set_setting("stitch_type", stitch_type)
         self.db.set_setting("auto_resolution", "1" if auto_resolution else "0")
+        self.db.set_setting("original_bitrate", "1" if original_bitrate else "0")
         LOGGER.info(
-            "Using stitch settings output_size=%s bitrate=%s stitch_type=%s auto=%s",
+            "Using stitch settings output_size=%s bitrate=%s stitch_type=%s auto=%s original_bitrate=%s",
             output_size,
             bitrate,
             stitch_type,
             auto_resolution,
+            original_bitrate,
         )
-        return output_size, bitrate, stitch_type, auto_resolution
+        return output_size, bitrate, stitch_type, auto_resolution, original_bitrate
 
     def set_stitch_settings(
-        self, output_size: Optional[str], bitrate: str, stitch_type: str, auto_resolution: bool
+        self,
+        output_size: Optional[str],
+        bitrate: str,
+        stitch_type: str,
+        auto_resolution: bool,
+        original_bitrate: bool,
     ) -> None:
         output_size = (output_size or "").strip()
         bitrate = (bitrate or "").strip()
         stitch_type = (stitch_type or "").strip()
-        if not bitrate or not stitch_type:
-            raise ValueError("bitrate and stitch_type must be provided")
+        if not stitch_type:
+            raise ValueError("stitch_type must be provided")
+        if not original_bitrate and not bitrate:
+            raise ValueError("bitrate must be provided when original bitrate is disabled")
         if not auto_resolution and not output_size:
             raise ValueError("output_size must be provided when auto resolution is disabled")
         if not output_size:
@@ -585,16 +607,19 @@ class AutoStitcher:
             self.bitrate = bitrate
             self.stitch_type = stitch_type
             self.auto_resolution = bool(auto_resolution)
+            self.original_bitrate = bool(original_bitrate)
             self.db.set_setting("output_size", output_size)
             self.db.set_setting("bitrate", bitrate)
             self.db.set_setting("stitch_type", stitch_type)
             self.db.set_setting("auto_resolution", "1" if self.auto_resolution else "0")
+            self.db.set_setting("original_bitrate", "1" if self.original_bitrate else "0")
         LOGGER.info(
-            "Updated stitch settings output_size=%s bitrate=%s stitch_type=%s auto=%s",
+            "Updated stitch settings output_size=%s bitrate=%s stitch_type=%s auto=%s original_bitrate=%s",
             output_size,
             bitrate,
             stitch_type,
             self.auto_resolution,
+            self.original_bitrate,
         )
 
     def _base_input_size(self, sources: Iterable[str]) -> Optional[int]:
@@ -927,7 +952,7 @@ class AutoStitcher:
                 "-output_size",
                 output_size_value,
             ]
-            if self.bitrate:
+            if not self.original_bitrate and self.bitrate:
                 cmd.extend(["-bitrate", self.bitrate])
             cmd.extend(
                 [
@@ -1111,6 +1136,7 @@ class AutoStitcher:
                 "bitrate": self.bitrate,
                 "stitch_type": self.stitch_type,
                 "auto_resolution": self.auto_resolution,
+                "original_bitrate": self.original_bitrate,
             },
             "concurrency": {
                 "stitch": self.stitch_parallelism,
@@ -1344,8 +1370,11 @@ def create_app(controller: AutoStitcher) -> Flask:
         bitrate = payload.get("bitrate")
         stitch_type = payload.get("stitch_type")
         auto_resolution = payload.get("auto_resolution", False)
+        original_bitrate = payload.get("original_bitrate", False)
         try:
-            controller.set_stitch_settings(output_size, bitrate, stitch_type, bool(auto_resolution))
+            controller.set_stitch_settings(
+                output_size, bitrate, stitch_type, bool(auto_resolution), bool(original_bitrate)
+            )
         except ValueError as exc:
             return jsonify({"error": str(exc)}), 400
         return jsonify(
@@ -1354,6 +1383,7 @@ def create_app(controller: AutoStitcher) -> Flask:
                 "bitrate": controller.bitrate,
                 "stitch_type": controller.stitch_type,
                 "auto_resolution": controller.auto_resolution,
+                "original_bitrate": controller.original_bitrate,
             }
         )
 
