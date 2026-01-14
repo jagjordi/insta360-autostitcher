@@ -29,4 +29,5 @@ services:
     container_name: insta360-frontend
     network_mode: host
     environment:
+      NGINX_PORT: ${NGINX_PORT:-3000}
       API_PROXY_TARGET: ${BACKEND_API_URL:-http://127.0.0.1:8000}
