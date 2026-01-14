@@ -31,3 +31,5 @@ services:
       - "${FRONTEND_PORT:-3000}:3000"
     environment:
       API_PROXY_TARGET: ${BACKEND_API_URL:-http://127.0.0.1:8000}
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
