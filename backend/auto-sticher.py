@@ -96,6 +96,23 @@ def utc_now() -> str:
     return datetime.utcnow().isoformat(timespec="seconds")
 
 
+def format_creation_time(timestamp: str) -> str:
+    try:
+        return datetime.fromisoformat(timestamp).isoformat()
+    except ValueError:
+        pass
+    try:
+        return datetime.strptime(timestamp, "%Y%m%d_%H%M%S").isoformat()
+    except ValueError:
+        pass
+    if " " in timestamp:
+        try:
+            return datetime.fromisoformat(timestamp.replace(" ", "T")).isoformat()
+        except ValueError:
+            pass
+    return timestamp
+
+
 def ensure_dirs() -> None:
     LOGGER.debug(
         "Ensuring storage at %s with RAW=%s OUT=%s THUMBNAILS=%s",
@@ -1066,11 +1083,7 @@ class AutoStitcher:
                 ratio = min(output_size / expected_size, 1.0) if expected_size else 0
                 status = STATUS_FAILED
                 if process.returncode == 0 and ratio >= MIN_SUCCESS_RATIO and os.path.exists(temp_output):
-                    timestamp_iso = row["timestamp"]
-                    try:
-                        datetime.fromisoformat(timestamp_iso)
-                    except ValueError:
-                        timestamp_iso = row["timestamp"].replace(" ", "T")
+                    timestamp_iso = format_creation_time(row["timestamp"])
                     ffmpeg_cmd = [
                         "ffmpeg",
                         "-y",
@@ -1081,6 +1094,30 @@ class AutoStitcher:
                         "-map",
                         "0",
                         "-metadata",
+                        f"creation_time={timestamp_iso}",
+                        "-metadata",
+                        "spherical=true",
+                        "-metadata",
+                        "stitched=true",
+                        "-metadata",
+                        "projection_type=equirectangular",
+                        "-metadata",
+                        "stereo_mode=mono",
+                        "-metadata",
+                        "stitching_software=Insta360-AutoStitcher",
+                        "-metadata:s:v:0",
+                        f"creation_time={timestamp_iso}",
+                        "-metadata:s:v:0",
+                        "spherical=true",
+                        "-metadata:s:v:0",
+                        "stitched=true",
+                        "-metadata:s:v:0",
+                        "projection_type=equirectangular",
+                        "-metadata:s:v:0",
+                        "stereo_mode=mono",
+                        "-metadata:s:v:0",
+                        "stitching_software=Insta360-AutoStitcher",
+                        "-metadata:s:a:0",
                         f"creation_time={timestamp_iso}",
                         final_file,
                     ]
