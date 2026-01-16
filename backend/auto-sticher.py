@@ -1082,7 +1082,7 @@ class AutoStitcher:
                 expected_size = self._expected_size(job_id)
                 ratio = min(output_size / expected_size, 1.0) if expected_size else 0
                 status = STATUS_FAILED
-                if process.returncode == 0 and ratio >= MIN_SUCCESS_RATIO and os.path.exists(temp_output):
+                if process.returncode == 0 and os.path.exists(temp_output):
                     timestamp_iso = format_creation_time(row["timestamp"])
                     ffmpeg_cmd = [
                         "ffmpeg",
