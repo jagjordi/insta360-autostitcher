@@ -62,10 +62,11 @@ const statusOrder: Record<TaskAction | 'status', number> = {
 
 export default function App() {
   const queryClient = useQueryClient();
+  const [pollingFast, setPollingFast] = useState(false);
   const statusQuery = useQuery({
     queryKey: ['status'],
     queryFn: fetchStatus,
-    refetchInterval: 15000
+    refetchInterval: pollingFast ? 1000 : 15000
   });
 
   const mutation = useMutation({
@@ -234,6 +235,10 @@ export default function App() {
   const trigger = (action: TaskAction) => {
     mutation.mutate(action);
   };
+
+  useEffect(() => {
+    setPollingFast(controlsLocked || terminateMutation.isPending);
+  }, [controlsLocked, terminateMutation.isPending]);
 
   return (
     <div className="app-container">
