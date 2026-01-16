@@ -31,12 +31,14 @@
   text-transform: uppercase;
   letter-spacing: 0.08em;
   color: #7b8496;
+  display: block;
 }
 
 .stat-value {
   font-size: 1.75rem;
   font-weight: 700;
   color: #0f1621;
+  display: block;
 }
 
 .muted {
