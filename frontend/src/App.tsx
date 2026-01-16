@@ -4,6 +4,9 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import {
   fetchStatus,
   generateThumbnailsForJobs,
+  getAuthToken,
+  login,
+  setAuthToken,
   stitchSelectedJobs,
   triggerTask,
   terminateTask,
@@ -82,6 +85,8 @@ export default function App() {
   const jobs = statusQuery.data?.jobs ?? [];
   const [selectedJobs, setSelectedJobs] = useState<Set<string>>(new Set());
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [loginOpen, setLoginOpen] = useState(false);
+  const [loginTokenValue, setLoginTokenValue] = useState('');
   const [activeTask, setActiveTask] = useState<{ id: string; action: TaskAction } | null>(null);
   const [lastTaskTriggeredAt, setLastTaskTriggeredAt] = useState(0);
   const [confirmStop, setConfirmStop] = useState(false);
@@ -200,9 +205,24 @@ export default function App() {
     stitchSettings
   ]);
   const lastUpdated = statusQuery.dataUpdatedAt ? new Date(statusQuery.dataUpdatedAt).toLocaleTimeString() : '—';
-  const controlsLocked = mutation.isPending || !!activeTask;
+  const controlsLocked = mutation.isPending || !!activeTask || loginOpen;
   const activeTasks = statusQuery.data?.active_tasks ?? [];
   const showTaskControl = mutation.isPending || !!activeTask;
+
+  useEffect(() => {
+    const token = getAuthToken();
+    if (token && !loginTokenValue) {
+      setLoginTokenValue(token);
+    }
+  }, [loginTokenValue]);
+
+  useEffect(() => {
+    const error = statusQuery.error as (Error & { status?: number }) | null;
+    if (statusQuery.isError && error?.status === 401) {
+      setAuthToken(null);
+      setLoginOpen(true);
+    }
+  }, [statusQuery.isError, statusQuery.error]);
 
   useEffect(() => {
     if (!activeTask || !statusQuery.data?.active_tasks) {
@@ -228,6 +248,15 @@ export default function App() {
     mutationFn: (taskId: string) => terminateTask(taskId),
     onSuccess: () => {
       setConfirmStop(false);
+      queryClient.invalidateQueries({ queryKey: ['status'] });
+    }
+  });
+
+  const loginMutation = useMutation({
+    mutationFn: (token: string) => login(token),
+    onSuccess: (_data, token) => {
+      setAuthToken(token);
+      setLoginOpen(false);
       queryClient.invalidateQueries({ queryKey: ['status'] });
     }
   });
@@ -563,6 +592,34 @@ export default function App() {
             )}
             {settingsMutation.isError && (
               <p className="error">Failed to update settings: {(settingsMutation.error as Error)?.message}</p>
+            )}
+          </div>
+        </div>
+      )}
+      {loginOpen && (
+        <div className="modal-backdrop">
+          <div className="modal">
+            <h3>Login</h3>
+            <p className="muted">Enter the access token to continue.</p>
+            <input
+              type="password"
+              value={loginTokenValue}
+              onChange={(event) => setLoginTokenValue(event.target.value)}
+              placeholder="Access token"
+              disabled={loginMutation.isPending}
+            />
+            <div className="modal-actions">
+              <button
+                type="button"
+                className="primary"
+                onClick={() => loginMutation.mutate(loginTokenValue.trim())}
+                disabled={!loginTokenValue.trim() || loginMutation.isPending}
+              >
+                {loginMutation.isPending ? 'Logging in…' : 'Login'}
+              </button>
+            </div>
+            {loginMutation.isError && (
+              <p className="error">Login failed: {(loginMutation.error as Error)?.message}</p>
             )}
           </div>
         </div>

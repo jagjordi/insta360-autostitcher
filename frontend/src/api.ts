@@ -6,11 +6,34 @@ const headers = {
   'Content-Type': 'application/json'
 };
 
+const TOKEN_KEY = 'autostitcher_login_token';
+
+export function setAuthToken(token: string | null): void {
+  if (!token) {
+    localStorage.removeItem(TOKEN_KEY);
+    return;
+  }
+  localStorage.setItem(TOKEN_KEY, token);
+}
+
+export function getAuthToken(): string | null {
+  return localStorage.getItem(TOKEN_KEY);
+}
+
 async function request<T>(path: string, options?: RequestInit): Promise<T> {
-  const response = await fetch(`${API_BASE}${path}`, options);
+  const token = getAuthToken();
+  const response = await fetch(`${API_BASE}${path}`, {
+    ...options,
+    headers: {
+      ...(options?.headers ?? {}),
+      ...(token ? { Authorization: `Bearer ${token}` } : {})
+    }
+  });
   if (!response.ok) {
     const message = await response.text();
-    throw new Error(message || 'Request failed');
+    const error = new Error(message || 'Request failed') as Error & { status?: number };
+    error.status = response.status;
+    throw error;
   }
   return response.json() as Promise<T>;
 }
@@ -26,6 +49,14 @@ export function triggerTask(action: TaskAction): Promise<{ scheduled: string; ta
     method: 'POST',
     headers,
     body: JSON.stringify({ action })
+  });
+}
+
+export function login(token: string): Promise<{ ok: boolean }> {
+  return request<{ ok: boolean }>('/login', {
+    method: 'POST',
+    headers,
+    body: JSON.stringify({ token })
   });
 }
 

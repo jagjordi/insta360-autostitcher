@@ -66,6 +66,7 @@ SCAN_INTERVAL = int(os.getenv("SCAN_INTERVAL", "600"))
 REST_PORT = int(os.getenv("AUTO_STITCHER_PORT", "8000"))
 LOG_LEVEL = os.getenv("AUTO_STITCHER_LOG_LEVEL", "INFO")
 DEBUG_FLAG = os.getenv("AUTO_STITCHER_DEBUG", "0").lower() in {"1", "true", "yes", "on"}
+LOGIN_TOKEN = os.getenv("LOGIN_TOKEN", "")
 
 STATUS_UNPROCESSED = "unprocessed"
 STATUS_PROCESSING = "processing"
@@ -1371,6 +1372,16 @@ def create_app(controller: AutoStitcher) -> Flask:
 
     @app.before_request
     def log_request() -> None:
+        if LOGIN_TOKEN and request.path != "/login":
+            auth_header = request.headers.get("Authorization", "")
+            token = ""
+            if auth_header.startswith("Bearer "):
+                token = auth_header.split(" ", 1)[1].strip()
+            if not token:
+                token = request.headers.get("X-Auth-Token", "").strip()
+            if token != LOGIN_TOKEN:
+                LOGGER.warning("Unauthorized request to %s", request.path)
+                return jsonify({"error": "unauthorized"}), 401
         LOGGER.debug(">> %s %s", request.method, request.path)
 
     @app.after_request
@@ -1422,6 +1433,16 @@ def create_app(controller: AutoStitcher) -> Flask:
             return jsonify({"terminated": task_id})
         LOGGER.warning("Termination requested for unknown task %s", task_id)
         return jsonify({"error": "unknown task"}), 404
+
+    @app.post("/login")
+    def login() -> object:
+        if not LOGIN_TOKEN:
+            return jsonify({"ok": True})
+        payload = request.get_json(silent=True) or {}
+        token = payload.get("token")
+        if token != LOGIN_TOKEN:
+            return jsonify({"error": "invalid token"}), 401
+        return jsonify({"ok": True})
 
     @app.get("/thumbnails/<job_id>.jpg")
     def thumbnails(job_id: str):
