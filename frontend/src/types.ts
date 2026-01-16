@@ -19,6 +19,7 @@ export interface Job {
 export interface StatusResponse {
   jobs: Job[];
   active_jobs: string[];
+  active_tasks?: Array<{ id: string; action: TaskAction; started_at: string }>;
   pending_jobs: number;
   queued_jobs: number;
   max_parallel_jobs: number;

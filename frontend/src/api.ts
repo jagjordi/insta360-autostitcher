@@ -21,11 +21,19 @@ export function fetchStatus(): Promise<StatusResponse> {
   });
 }
 
-export function triggerTask(action: TaskAction): Promise<{ scheduled: string }> {
-  return request<{ scheduled: string }>('/tasks', {
+export function triggerTask(action: TaskAction): Promise<{ scheduled: string; task_id: string }> {
+  return request<{ scheduled: string; task_id: string }>('/tasks', {
     method: 'POST',
     headers,
     body: JSON.stringify({ action })
+  });
+}
+
+export function terminateTask(taskId: string): Promise<{ terminated: string }> {
+  return request<{ terminated: string }>('/tasks/terminate', {
+    method: 'POST',
+    headers,
+    body: JSON.stringify({ task_id: taskId })
   });
 }
 

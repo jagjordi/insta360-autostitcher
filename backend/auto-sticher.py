@@ -23,7 +23,7 @@ from dataclasses import dataclass
 from datetime import datetime
 from typing import Deque, Dict, Iterable, List, Optional, Set
 from collections import deque
-from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import ThreadPoolExecutor, as_completed
 
 from flask import Flask, jsonify, request, send_from_directory
 
@@ -297,6 +297,15 @@ class JobCandidate:
         return list(self.source_files)
 
 
+@dataclass
+class ActiveTask:
+    task_id: str
+    action: str
+    started_at: str
+    cancel_event: threading.Event
+    thread: threading.Thread
+
+
 class JobDatabase:
     def __init__(self, db_path: str) -> None:
         self.db_path = db_path
@@ -450,6 +459,8 @@ class AutoStitcher:
     def __init__(self, debug: bool = False) -> None:
         ensure_dirs()
         self.db = JobDatabase(DATABASE_PATH)
+        self._task_lock = threading.Lock()
+        self._active_tasks: Dict[str, ActiveTask] = {}
         self._lock = threading.Lock()
         self._active_threads: Dict[str, threading.Thread] = {}
         self._pending_jobs: Deque[str] = deque()
@@ -806,7 +817,10 @@ class AutoStitcher:
             )
         return list(candidates.values())
 
-    def scan(self) -> Dict[str, int]:
+    def scan(self, cancel_event: Optional[threading.Event] = None) -> Dict[str, int]:
+        if cancel_event and cancel_event.is_set():
+            LOGGER.info("Scan cancelled before start")
+            return {"added": 0}
         added = 0
         LOGGER.info("Running scan for new RAW pairs")
         existing = self.db.list_final_files()
@@ -816,6 +830,8 @@ class AutoStitcher:
             return {"added": 0}
 
         def process_candidate(candidate: JobCandidate) -> int:
+            if cancel_event and cancel_event.is_set():
+                return 0
             final_file = candidate.final_file
             if self.db.find_by_final_file(final_file):
                 LOGGER.debug("Job for %s already exists; skipping", final_file)
@@ -838,18 +854,34 @@ class AutoStitcher:
             LOGGER.info("Queued job %s with expected size %d", candidate.timestamp, expected_size)
             return 1
 
+        futures = []
         with ThreadPoolExecutor(max_workers=self.scan_parallelism) as executor:
-            for result in executor.map(process_candidate, candidates):
-                added += result
+            for candidate in candidates:
+                futures.append(executor.submit(process_candidate, candidate))
+            for future in as_completed(futures):
+                if cancel_event and cancel_event.is_set():
+                    for pending in futures:
+                        pending.cancel()
+                    LOGGER.info("Scan cancelled; stopping remaining candidates")
+                    break
+                added += future.result()
         LOGGER.info("Scan complete; %d new jobs added", added)
         return {"added": added}
 
-    def deep_scan(self) -> Dict[str, int]:
+    def deep_scan(self, cancel_event: Optional[threading.Event] = None) -> Dict[str, int]:
+        if cancel_event and cancel_event.is_set():
+            LOGGER.info("Deep scan cancelled before start")
+            return {"added": 0, "updated": 0}
         LOGGER.info("Running deep scan to refresh existing jobs")
-        summary = self.scan()
+        summary = self.scan(cancel_event)
+        if cancel_event and cancel_event.is_set():
+            summary["updated"] = 0
+            return summary
         rows = self.db.fetch_jobs()
 
         def refresh_row(row: sqlite3.Row) -> int:
+            if cancel_event and cancel_event.is_set():
+                return 0
             sources = json.loads(row["source_files"])
             missing_sources = [path for path in sources if not os.path.exists(path)]
             base_size = None if missing_sources else self._base_input_size(sources)
@@ -881,15 +913,23 @@ class AutoStitcher:
             return 1
 
         updated = 0
+        futures = []
         with ThreadPoolExecutor(max_workers=self.deep_scan_parallelism) as executor:
-            for result in executor.map(refresh_row, rows):
-                updated += result
+            for row in rows:
+                futures.append(executor.submit(refresh_row, row))
+            for future in as_completed(futures):
+                if cancel_event and cancel_event.is_set():
+                    for pending in futures:
+                        pending.cancel()
+                    LOGGER.info("Deep scan cancelled; stopping remaining updates")
+                    break
+                updated += future.result()
         summary["updated"] = updated
         LOGGER.info("Deep scan refreshed %d jobs", updated)
         return summary
 
     # ------------------------------ Stitching -----------------------------
-    def stitch(self, include_failed: bool = False) -> Dict[str, int]:
+    def stitch(self, include_failed: bool = False, cancel_event: Optional[threading.Event] = None) -> Dict[str, int]:
         statuses = [STATUS_UNPROCESSED]
         if include_failed:
             statuses.append(STATUS_FAILED)
@@ -897,6 +937,9 @@ class AutoStitcher:
         LOGGER.info("Scheduling stitch run for %d jobs (include_failed=%s)", len(jobs), include_failed)
         queued = 0
         for job in jobs:
+            if cancel_event and cancel_event.is_set():
+                LOGGER.info("Stitch scheduling cancelled after %d queued jobs", queued)
+                break
             queued += int(self._enqueue_job(job["id"]))
         if queued:
             LOGGER.info("Queued %d jobs for stitching", queued)
@@ -1129,6 +1172,46 @@ class AutoStitcher:
             "thumbnail_url": f"/thumbnails/{row['id']}.jpg" if os.path.exists(thumbnail_path(row["id"])) else None,
         }
 
+    def start_task(self, action: str, job_ids: Optional[List[str]] = None) -> str:
+        task_id = str(uuid.uuid4())
+        cancel_event = threading.Event()
+        started_at = utc_now()
+
+        def runner() -> None:
+            try:
+                self.run_action(action, job_ids, cancel_event)
+            finally:
+                with self._task_lock:
+                    self._active_tasks.pop(task_id, None)
+
+        thread = threading.Thread(target=runner, daemon=True)
+        with self._task_lock:
+            self._active_tasks[task_id] = ActiveTask(
+                task_id=task_id,
+                action=action,
+                started_at=started_at,
+                cancel_event=cancel_event,
+                thread=thread,
+            )
+        thread.start()
+        return task_id
+
+    def cancel_task(self, task_id: str) -> bool:
+        with self._task_lock:
+            task = self._active_tasks.get(task_id)
+        if not task:
+            return False
+        task.cancel_event.set()
+        return True
+
+    def list_active_tasks(self) -> List[Dict[str, str]]:
+        with self._task_lock:
+            tasks = list(self._active_tasks.values())
+        return [
+            {"id": task.task_id, "action": task.action, "started_at": task.started_at}
+            for task in tasks
+        ]
+
     def get_status(self) -> Dict[str, object]:
         jobs = [self.serialize_job(row) for row in self.db.fetch_jobs()]
         with self._lock:
@@ -1152,6 +1235,7 @@ class AutoStitcher:
             "queued_jobs": queued_jobs,
             "max_parallel_jobs": self.stitch_parallelism,
             "expected_size_ratio": self.expected_size_ratio,
+            "active_tasks": self.list_active_tasks(),
             "stitch_settings": {
                 "output_size": self.output_size,
                 "bitrate": self.bitrate,
@@ -1167,23 +1251,35 @@ class AutoStitcher:
             },
         }
 
-    def run_action(self, action: str, job_ids: Optional[List[str]] = None) -> Dict[str, int]:
+    def run_action(
+        self,
+        action: str,
+        job_ids: Optional[List[str]] = None,
+        cancel_event: Optional[threading.Event] = None,
+    ) -> Dict[str, int]:
         LOGGER.info("Running action %s", action)
         if action == "scan":
-            return self.scan()
+            return self.scan(cancel_event)
         if action == "deep_scan":
-            return self.deep_scan()
+            return self.deep_scan(cancel_event)
         if action == "stitch":
-            return self.stitch(include_failed=False)
+            return self.stitch(include_failed=False, cancel_event=cancel_event)
         if action == "full_stitch":
-            return self.stitch(include_failed=True)
+            return self.stitch(include_failed=True, cancel_event=cancel_event)
         if action == "generate_thumbnails":
-            return self.generate_thumbnails(job_ids)
+            return self.generate_thumbnails(job_ids, cancel_event=cancel_event)
         if action == "stitch_selected":
-            return self.stitch_selected(job_ids or [])
+            return self.stitch_selected(job_ids or [], cancel_event=cancel_event)
         raise ValueError(f"Unknown action: {action}")
 
-    def generate_thumbnails(self, job_ids: Optional[List[str]] = None) -> Dict[str, int]:
+    def generate_thumbnails(
+        self,
+        job_ids: Optional[List[str]] = None,
+        cancel_event: Optional[threading.Event] = None,
+    ) -> Dict[str, int]:
+        if cancel_event and cancel_event.is_set():
+            LOGGER.info("Thumbnail generation cancelled before start")
+            return {"generated": 0, "skipped": 0, "failed": 0}
         os.makedirs(THUMBNAIL_DIR, exist_ok=True)
         rows = self.db.fetch_jobs_by_ids(job_ids) if job_ids else self.db.fetch_jobs()
         generated = 0
@@ -1191,6 +1287,8 @@ class AutoStitcher:
         failed = 0
 
         def process_thumbnail(row: sqlite3.Row) -> tuple[int, int, int]:
+            if cancel_event and cancel_event.is_set():
+                return (0, 0, 0)
             thumb = thumbnail_path(row["id"])
             if os.path.exists(thumb):
                 return (0, 1, 0)
@@ -1209,8 +1307,17 @@ class AutoStitcher:
                 return (1, 0, 0)
             return (0, 0, 1)
 
+        futures = []
         with ThreadPoolExecutor(max_workers=self.thumbnail_parallelism) as executor:
-            for gen, skip, fail in executor.map(process_thumbnail, rows):
+            for row in rows:
+                futures.append(executor.submit(process_thumbnail, row))
+            for future in as_completed(futures):
+                if cancel_event and cancel_event.is_set():
+                    for pending in futures:
+                        pending.cancel()
+                    LOGGER.info("Thumbnail generation cancelled; stopping remaining jobs")
+                    break
+                gen, skip, fail = future.result()
                 generated += gen
                 skipped += skip
                 failed += fail
@@ -1230,7 +1337,11 @@ class AutoStitcher:
             )
         return {"generated": generated, "skipped": skipped, "failed": failed}
 
-    def stitch_selected(self, job_ids: List[str]) -> Dict[str, int]:
+    def stitch_selected(
+        self,
+        job_ids: List[str],
+        cancel_event: Optional[threading.Event] = None,
+    ) -> Dict[str, int]:
         if not job_ids:
             LOGGER.info("No job IDs provided for stitch_selected")
             return {"scheduled": 0}
@@ -1238,6 +1349,9 @@ class AutoStitcher:
         queued = 0
         allowed_statuses = {STATUS_UNPROCESSED, STATUS_FAILED}
         for row in rows:
+            if cancel_event and cancel_event.is_set():
+                LOGGER.info("Stitch selected cancelled after %d queued jobs", queued)
+                break
             if row["status"] not in allowed_statuses:
                 LOGGER.debug(
                     "Skipping job %s for stitch_selected due to status %s",
@@ -1293,8 +1407,21 @@ def create_app(controller: AutoStitcher) -> Flask:
         else:
             job_ids = None
         LOGGER.info("Scheduling action %s from REST request", action)
-        threading.Thread(target=controller.run_action, args=(action, job_ids), daemon=True).start()
-        return jsonify({"scheduled": action})
+        task_id = controller.start_task(action, job_ids)
+        return jsonify({"scheduled": action, "task_id": task_id})
+
+    @app.post("/tasks/terminate")
+    def terminate_task() -> object:
+        payload = request.get_json(silent=True) or {}
+        task_id = payload.get("task_id")
+        if not isinstance(task_id, str) or not task_id:
+            LOGGER.warning("Invalid task_id for termination: %s", task_id)
+            return jsonify({"error": "task_id must be provided"}), 400
+        if controller.cancel_task(task_id):
+            LOGGER.info("Termination requested for task %s", task_id)
+            return jsonify({"terminated": task_id})
+        LOGGER.warning("Termination requested for unknown task %s", task_id)
+        return jsonify({"error": "unknown task"}), 404
 
     @app.get("/thumbnails/<job_id>.jpg")
     def thumbnails(job_id: str):

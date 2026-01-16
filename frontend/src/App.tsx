@@ -6,6 +6,7 @@ import {
   generateThumbnailsForJobs,
   stitchSelectedJobs,
   triggerTask,
+  terminateTask,
   updateExpectedRatio,
   updateParallelism,
   computeExpectedRatio,
@@ -69,7 +70,9 @@ export default function App() {
 
   const mutation = useMutation({
     mutationFn: (action: TaskAction) => triggerTask(action),
-    onSuccess: () => {
+    onSuccess: (data, action) => {
+      setActiveTask({ id: data.task_id, action });
+      setConfirmStop(false);
       queryClient.invalidateQueries({ queryKey: ['status'] });
     }
   });
@@ -77,6 +80,8 @@ export default function App() {
   const jobs = statusQuery.data?.jobs ?? [];
   const [selectedJobs, setSelectedJobs] = useState<Set<string>>(new Set());
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [activeTask, setActiveTask] = useState<{ id: string; action: TaskAction } | null>(null);
+  const [confirmStop, setConfirmStop] = useState(false);
   const [stitchConcurrencyValue, setStitchConcurrencyValue] = useState(1);
   const [scanConcurrencyValue, setScanConcurrencyValue] = useState(25);
   const [deepScanConcurrencyValue, setDeepScanConcurrencyValue] = useState(1);
@@ -192,6 +197,28 @@ export default function App() {
     stitchSettings
   ]);
   const lastUpdated = statusQuery.dataUpdatedAt ? new Date(statusQuery.dataUpdatedAt).toLocaleTimeString() : '—';
+  const controlsLocked = mutation.isPending || !!activeTask;
+  const activeTasks = statusQuery.data?.active_tasks ?? [];
+  const showTaskControl = mutation.isPending || !!activeTask;
+
+  useEffect(() => {
+    if (!activeTask || !statusQuery.data?.active_tasks) {
+      return;
+    }
+    const stillRunning = activeTasks.some((task) => task.id === activeTask.id);
+    if (!stillRunning) {
+      setActiveTask(null);
+      setConfirmStop(false);
+    }
+  }, [activeTasks, activeTask, statusQuery.data?.active_tasks]);
+
+  const terminateMutation = useMutation({
+    mutationFn: (taskId: string) => terminateTask(taskId),
+    onSuccess: () => {
+      setConfirmStop(false);
+      queryClient.invalidateQueries({ queryKey: ['status'] });
+    }
+  });
 
   const trigger = (action: TaskAction) => {
     mutation.mutate(action);
@@ -228,10 +255,40 @@ export default function App() {
         <div className="actions-header">
           <h2>Controls</h2>
           <div className="action-buttons">
-            <button className="ghost" type="button" onClick={() => statusQuery.refetch()} disabled={statusQuery.isFetching}>
+            {showTaskControl && (
+              <div className="task-control">
+                {confirmStop && activeTask ? (
+                  <button
+                    type="button"
+                    className="confirm-stop"
+                    onClick={() => activeTask && terminateMutation.mutate(activeTask.id)}
+                    disabled={terminateMutation.isPending}
+                  >
+                    {terminateMutation.isPending ? 'Stopping…' : 'Confirm?'}
+                  </button>
+                ) : (
+                  <button
+                    type="button"
+                    className="task-spinner"
+                    onClick={() => setConfirmStop(true)}
+                    disabled={!activeTask || terminateMutation.isPending}
+                    aria-label="Stop running task"
+                  >
+                    <span className="spinner-ring" aria-hidden="true" />
+                    <span className="spinner-stop" aria-hidden="true" />
+                  </button>
+                )}
+              </div>
+            )}
+            <button
+              className="ghost"
+              type="button"
+              onClick={() => statusQuery.refetch()}
+              disabled={statusQuery.isFetching || controlsLocked}
+            >
               Refresh
             </button>
-            <button className="ghost" type="button" onClick={() => setSettingsOpen(true)}>
+            <button className="ghost" type="button" onClick={() => setSettingsOpen(true)} disabled={controlsLocked}>
               Settings
             </button>
           </div>
@@ -242,7 +299,7 @@ export default function App() {
               key={action}
               type="button"
               className="action-card"
-              disabled={mutation.isPending}
+              disabled={controlsLocked}
               onClick={() => trigger(action)}
             >
               <div className="action-card-content">
@@ -252,7 +309,7 @@ export default function App() {
             </button>
           ))}
         </div>
-        {mutation.isPending && <p className="muted">Sending command…</p>}
+        {controlsLocked && <p className="muted">Command running…</p>}
         {mutation.isError && <p className="error">{(mutation.error as Error)?.message}</p>}
       </section>
 
@@ -279,7 +336,7 @@ export default function App() {
         onStitch={() => stitchSelectedMutation.mutate(Array.from(selectedJobs))}
         isGenerating={thumbnailsSelectedMutation.isPending}
         isStitching={stitchSelectedMutation.isPending}
-        disabled={selectedJobs.size === 0}
+        disabled={selectedJobs.size === 0 || controlsLocked}
       />
       <JobTable
         jobs={jobs}
@@ -319,7 +376,7 @@ export default function App() {
         onStitch={() => stitchSelectedMutation.mutate(Array.from(selectedJobs))}
         isGenerating={thumbnailsSelectedMutation.isPending}
         isStitching={stitchSelectedMutation.isPending}
-        disabled={selectedJobs.size === 0}
+        disabled={selectedJobs.size === 0 || controlsLocked}
       />
       {thumbnailsSelectedMutation.isError && (
         <div className="panel error">

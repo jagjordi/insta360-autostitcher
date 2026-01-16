@@ -52,6 +52,75 @@
 .action-buttons {
   display: flex;
   gap: 0.5rem;
+  align-items: center;
+}
+
+.task-control {
+  display: flex;
+  align-items: center;
+}
+
+.task-spinner {
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  border: 1px solid #c7ceda;
+  background: #f2f4f8;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  cursor: pointer;
+  transition: background 0.2s, border-color 0.2s;
+}
+
+.spinner-ring {
+  width: 16px;
+  height: 16px;
+  border: 2px solid #9aa6b2;
+  border-top-color: #3c4554;
+  border-radius: 50%;
+  animation: spin 0.8s linear infinite;
+}
+
+.spinner-stop {
+  width: 12px;
+  height: 12px;
+  background: #fff;
+  border-radius: 2px;
+  display: none;
+}
+
+.task-spinner:hover {
+  background: #e64545;
+  border-color: #d63f3f;
+}
+
+.task-spinner:hover .spinner-ring {
+  display: none;
+}
+
+.task-spinner:hover .spinner-stop {
+  display: block;
+}
+
+.task-spinner:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.confirm-stop {
+  border: none;
+  border-radius: 999px;
+  padding: 0.3rem 0.8rem;
+  background: #e64545;
+  color: #fff;
+  font-weight: 600;
+}
+
+.confirm-stop:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
 }
 
 .actions .action-grid {
@@ -100,11 +169,22 @@
   font-weight: 600;
 }
 
+.ghost:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
 .summary-grid {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
   gap: 1rem;
   margin-top: 1rem;
+}
+
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
 }
 
 .summary-card {
