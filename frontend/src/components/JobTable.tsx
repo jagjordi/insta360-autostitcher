@@ -37,6 +37,19 @@ const statusClasses: Record<Job['status'], string> = {
   failed: 'status-badge failed'
 };
 
+function parseTimestampValue(timestamp: string): number {
+  const parsed = Date.parse(timestamp);
+  if (!Number.isNaN(parsed)) {
+    return parsed;
+  }
+  const match = /^(\d{4})(\d{2})(\d{2})_(\d{2})(\d{2})(\d{2})$/.exec(timestamp);
+  if (!match) {
+    return 0;
+  }
+  const [, year, month, day, hour, minute, second] = match;
+  return Date.parse(`${year}-${month}-${day}T${hour}:${minute}:${second}`);
+}
+
 const queueStateLabels: Record<'queued' | 'pending', string> = {
   queued: 'Queued',
   pending: 'Pending'
@@ -164,8 +177,8 @@ export function JobTable({
     return [...jobs].sort((a, b) => {
       let result = 0;
       if (sortKey === 'timestamp') {
-        const aTime = new Date(a.timestamp).getTime();
-        const bTime = new Date(b.timestamp).getTime();
+        const aTime = parseTimestampValue(a.timestamp);
+        const bTime = parseTimestampValue(b.timestamp);
         result = aTime - bTime;
       } else if (sortKey === 'status') {
         result = a.status.localeCompare(b.status);
@@ -173,7 +186,7 @@ export function JobTable({
         result = (a[sortKey] ?? 0) - (b[sortKey] ?? 0);
       }
       if (result === 0) {
-        return new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime();
+        return parseTimestampValue(a.timestamp) - parseTimestampValue(b.timestamp);
       }
       return result * multiplier;
     });
