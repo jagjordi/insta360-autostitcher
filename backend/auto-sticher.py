@@ -18,7 +18,7 @@ import subprocess
 import threading
 import time
 import uuid
-from contextlib import closing
+from contextlib import closing, contextmanager
 from dataclasses import dataclass
 from datetime import datetime
 from typing import Deque, Dict, Iterable, List, Optional, Set
@@ -300,63 +300,76 @@ class JobCandidate:
 class JobDatabase:
     def __init__(self, db_path: str) -> None:
         self.db_path = db_path
+        self._lock = threading.Lock()
         self._init_schema()
 
+    @contextmanager
+    def _locked(self) -> Iterable[None]:
+        acquired = self._lock.acquire(timeout=60)
+        if not acquired:
+            raise TimeoutError("Timed out waiting for database lock")
+        try:
+            yield
+        finally:
+            self._lock.release()
+
     def _connect(self) -> sqlite3.Connection:
-        conn = sqlite3.connect(self.db_path, check_same_thread=False)
+        conn = sqlite3.connect(self.db_path, check_same_thread=False, timeout=60)
         conn.row_factory = sqlite3.Row
         return conn
 
     def _init_schema(self) -> None:
-        with closing(self._connect()) as conn:
-            conn.execute(
-                """
-                CREATE TABLE IF NOT EXISTS jobs (
-                    id TEXT PRIMARY KEY,
-                    timestamp TEXT NOT NULL,
-                    final_file TEXT NOT NULL UNIQUE,
-                    source_files TEXT NOT NULL,
-                    status TEXT NOT NULL,
-                    pid INTEGER,
-                    stitched_size INTEGER DEFAULT 0,
-                    process REAL DEFAULT 0,
-                    expected_size INTEGER DEFAULT 0,
-                    created_at TEXT NOT NULL,
-                    updated_at TEXT NOT NULL
+        with self._locked():
+            with closing(self._connect()) as conn:
+                conn.execute(
+                    """
+                    CREATE TABLE IF NOT EXISTS jobs (
+                        id TEXT PRIMARY KEY,
+                        timestamp TEXT NOT NULL,
+                        final_file TEXT NOT NULL UNIQUE,
+                        source_files TEXT NOT NULL,
+                        status TEXT NOT NULL,
+                        pid INTEGER,
+                        stitched_size INTEGER DEFAULT 0,
+                        process REAL DEFAULT 0,
+                        expected_size INTEGER DEFAULT 0,
+                        created_at TEXT NOT NULL,
+                        updated_at TEXT NOT NULL
+                    )
+                    """
                 )
-                """
-            )
-            conn.execute(
-                """
-                CREATE INDEX IF NOT EXISTS idx_jobs_status
-                ON jobs(status)
-                """
-            )
-            conn.execute(
-                """
-                CREATE TABLE IF NOT EXISTS settings (
-                    key TEXT PRIMARY KEY,
-                    value TEXT NOT NULL
+                conn.execute(
+                    """
+                    CREATE INDEX IF NOT EXISTS idx_jobs_status
+                    ON jobs(status)
+                    """
                 )
-                """
-            )
-            conn.commit()
+                conn.execute(
+                    """
+                    CREATE TABLE IF NOT EXISTS settings (
+                        key TEXT PRIMARY KEY,
+                        value TEXT NOT NULL
+                    )
+                    """
+                )
+                conn.commit()
 
     def insert_job(self, *, timestamp: str, final_file: str, source_files: List[str],
                    status: str, expected_size: int) -> str:
         job_id = str(uuid.uuid4())
         payload = json.dumps(source_files)
         now = utc_now()
-        with closing(self._connect()) as conn:
-            conn.execute(
-                """
-                INSERT INTO jobs(id, timestamp, final_file, source_files, status,
-                                 expected_size, created_at, updated_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-                """,
-                (job_id, timestamp, final_file, payload, status, expected_size, now, now),
-            )
-            conn.commit()
+        with self._locked():
+            with closing(self._connect()) as conn:
+                conn.execute(
+                    """
+                    INSERT INTO jobs(id, timestamp, final_file, source_files, status,
+                                     expected_size, created_at, updated_at)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                    """,
+                    (job_id, timestamp, final_file, payload, status, expected_size, now, now),
+                )
+                conn.commit()
         return job_id
 
     def update_job(self, job_id: str, **fields) -> None:
@@ -365,61 +378,71 @@ class JobDatabase:
         fields["updated_at"] = utc_now()
         columns = ", ".join(f"{key} = ?" for key in fields.keys())
         values = list(fields.values()) + [job_id]
-        with closing(self._connect()) as conn:
-            conn.execute(f"UPDATE jobs SET {columns} WHERE id = ?", values)
-            conn.commit()
+        with self._locked():
+            with closing(self._connect()) as conn:
+                conn.execute(f"UPDATE jobs SET {columns} WHERE id = ?", values)
+                conn.commit()
 
     def fetch_jobs(self, statuses: Optional[Iterable[str]] = None) -> List[sqlite3.Row]:
-        with closing(self._connect()) as conn:
-            if statuses:
-                placeholders = ",".join("?" for _ in statuses)
-                query = f"SELECT * FROM jobs WHERE status IN ({placeholders}) ORDER BY timestamp"
-                rows = conn.execute(query, tuple(statuses)).fetchall()
-            else:
-                rows = conn.execute("SELECT * FROM jobs ORDER BY timestamp").fetchall()
+        with self._locked():
+            with closing(self._connect()) as conn:
+                if statuses:
+                    placeholders = ",".join("?" for _ in statuses)
+                    query = f"SELECT * FROM jobs WHERE status IN ({placeholders}) ORDER BY timestamp"
+                    rows = conn.execute(query, tuple(statuses)).fetchall()
+                else:
+                    rows = conn.execute("SELECT * FROM jobs ORDER BY timestamp").fetchall()
         return rows
 
     def fetch_job(self, job_id: str) -> Optional[sqlite3.Row]:
-        with closing(self._connect()) as conn:
-            row = conn.execute("SELECT * FROM jobs WHERE id = ?", (job_id,)).fetchone()
+        with self._locked():
+            with closing(self._connect()) as conn:
+                row = conn.execute("SELECT * FROM jobs WHERE id = ?", (job_id,)).fetchone()
         return row
 
     def get_setting(self, key: str) -> Optional[str]:
-        with closing(self._connect()) as conn:
-            row = conn.execute("SELECT value FROM settings WHERE key = ?", (key,)).fetchone()
+        with self._locked():
+            with closing(self._connect()) as conn:
+                row = conn.execute("SELECT value FROM settings WHERE key = ?", (key,)).fetchone()
         return row["value"] if row else None
 
     def set_setting(self, key: str, value: str) -> None:
-        with closing(self._connect()) as conn:
-            conn.execute(
-                """
-                INSERT INTO settings(key, value)
-                VALUES(?, ?)
-                ON CONFLICT(key) DO UPDATE SET value=excluded.value
-                """,
-                (key, value),
-            )
-            conn.commit()
+        with self._locked():
+            with closing(self._connect()) as conn:
+                conn.execute(
+                    """
+                    INSERT INTO settings(key, value)
+                    VALUES(?, ?)
+                    ON CONFLICT(key) DO UPDATE SET value=excluded.value
+                    """,
+                    (key, value),
+                )
+                conn.commit()
 
     def fetch_jobs_by_ids(self, job_ids: Iterable[str]) -> List[sqlite3.Row]:
         job_ids = list(job_ids)
         if not job_ids:
             return []
         placeholders = ",".join("?" for _ in job_ids)
-        with closing(self._connect()) as conn:
-            rows = conn.execute(f"SELECT * FROM jobs WHERE id IN ({placeholders})", job_ids).fetchall()
+        with self._locked():
+            with closing(self._connect()) as conn:
+                rows = conn.execute(
+                    f"SELECT * FROM jobs WHERE id IN ({placeholders})", job_ids
+                ).fetchall()
         return rows
 
     def find_by_final_file(self, final_file: str) -> Optional[sqlite3.Row]:
-        with closing(self._connect()) as conn:
-            row = conn.execute(
-                "SELECT * FROM jobs WHERE final_file = ?", (final_file,)
-            ).fetchone()
+        with self._locked():
+            with closing(self._connect()) as conn:
+                row = conn.execute(
+                    "SELECT * FROM jobs WHERE final_file = ?", (final_file,)
+                ).fetchone()
         return row
 
     def list_final_files(self) -> Set[str]:
-        with closing(self._connect()) as conn:
-            rows = conn.execute("SELECT final_file FROM jobs").fetchall()
+        with self._locked():
+            with closing(self._connect()) as conn:
+                rows = conn.execute("SELECT final_file FROM jobs").fetchall()
         return {row[0] for row in rows if row[0]}
 
 
@@ -427,7 +450,6 @@ class AutoStitcher:
     def __init__(self, debug: bool = False) -> None:
         ensure_dirs()
         self.db = JobDatabase(DATABASE_PATH)
-        self.db_lock = threading.Lock()
         self._lock = threading.Lock()
         self._active_threads: Dict[str, threading.Thread] = {}
         self._pending_jobs: Deque[str] = deque()
@@ -671,8 +693,7 @@ class AutoStitcher:
                 updates["stitched_size"] = stitched_size
             if not updates:
                 continue
-            with self.db_lock:
-                self.db.update_job(row["id"], **updates)
+            self.db.update_job(row["id"], **updates)
             LOGGER.debug(
                 "Job %s expected size refreshed to %d (progress=%.3f)",
                 row["id"],
