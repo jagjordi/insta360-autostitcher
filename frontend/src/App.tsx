@@ -72,6 +72,7 @@ export default function App() {
     mutationFn: (action: TaskAction) => triggerTask(action),
     onSuccess: (data, action) => {
       setActiveTask({ id: data.task_id, action });
+      setLastTaskTriggeredAt(Date.now());
       setConfirmStop(false);
       queryClient.invalidateQueries({ queryKey: ['status'] });
     }
@@ -81,6 +82,7 @@ export default function App() {
   const [selectedJobs, setSelectedJobs] = useState<Set<string>>(new Set());
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [activeTask, setActiveTask] = useState<{ id: string; action: TaskAction } | null>(null);
+  const [lastTaskTriggeredAt, setLastTaskTriggeredAt] = useState(0);
   const [confirmStop, setConfirmStop] = useState(false);
   const [stitchConcurrencyValue, setStitchConcurrencyValue] = useState(1);
   const [scanConcurrencyValue, setScanConcurrencyValue] = useState(25);
@@ -205,12 +207,21 @@ export default function App() {
     if (!activeTask || !statusQuery.data?.active_tasks) {
       return;
     }
+    if (statusQuery.dataUpdatedAt < lastTaskTriggeredAt) {
+      return;
+    }
     const stillRunning = activeTasks.some((task) => task.id === activeTask.id);
     if (!stillRunning) {
       setActiveTask(null);
       setConfirmStop(false);
     }
-  }, [activeTasks, activeTask, statusQuery.data?.active_tasks]);
+  }, [
+    activeTasks,
+    activeTask,
+    statusQuery.data?.active_tasks,
+    statusQuery.dataUpdatedAt,
+    lastTaskTriggeredAt
+  ]);
 
   const terminateMutation = useMutation({
     mutationFn: (taskId: string) => terminateTask(taskId),
