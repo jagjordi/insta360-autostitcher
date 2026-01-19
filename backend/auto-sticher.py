@@ -115,16 +115,49 @@ def format_creation_time(timestamp: str) -> str:
 
 def inject_spherical_metadata(path: str) -> bool:
     temp_output = f"{path}.spatial.mp4"
-    cmd = ["spatialmedia", "-i", path, temp_output]
+    metadata = {
+        "spherical": True,
+        "stitched": True,
+        "projection": "equirectangular",
+        "stereo": "mono",
+        "stitching_software": "Insta360-AutoStitcher",
+        "pose_yaw_degrees": 0,
+        "pose_pitch_degrees": 0,
+        "pose_roll_degrees": 0,
+        "projection_bounds_left": 0,
+        "projection_bounds_right": 0,
+        "projection_bounds_top": 0,
+        "projection_bounds_bottom": 0,
+    }
+    metadata_path = f"{path}.spatial.json"
+    result = None
     try:
-        result = subprocess.run(cmd, capture_output=True, check=False)  # noqa: S603
-    except FileNotFoundError:
-        cmd = ["python3", "-m", "spatialmedia", "-i", path, temp_output]
-        try:
-            result = subprocess.run(cmd, capture_output=True, check=False)  # noqa: S603
-        except FileNotFoundError:
-            LOGGER.warning("spatialmedia not found; skipping spherical metadata for %s", path)
-            return False
+        with open(metadata_path, "w") as handle:
+            json.dump(metadata, handle)
+        commands = [
+            ["spatialmedia", "-j", metadata_path, "-i", path, temp_output],
+            ["spatialmedia", "-i", path, temp_output, "-j", metadata_path],
+            ["python3", "-m", "spatialmedia", "-j", metadata_path, "-i", path, temp_output],
+            ["python3", "-m", "spatialmedia", "-i", path, temp_output, "-j", metadata_path],
+            ["spatialmedia", "-i", path, temp_output],
+            ["python3", "-m", "spatialmedia", "-i", path, temp_output],
+        ]
+        for cmd in commands:
+            try:
+                result = subprocess.run(cmd, capture_output=True, check=False)  # noqa: S603
+            except FileNotFoundError:
+                continue
+            if result.returncode == 0:
+                break
+    finally:
+        if os.path.exists(metadata_path):
+            try:
+                os.remove(metadata_path)
+            except OSError:
+                LOGGER.warning("Failed to remove spatialmedia metadata file %s", metadata_path)
+    if result is None:
+        LOGGER.warning("spatialmedia not found; skipping spherical metadata for %s", path)
+        return False
     if result.returncode != 0:
         LOGGER.warning(
             "spatialmedia metadata injection failed for %s: %s",

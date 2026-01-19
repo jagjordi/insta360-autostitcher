@@ -26,7 +26,7 @@ RUN set -eux; \
     dpkg-reconfigure -f noninteractive tzdata; \
     python3 -m venv /opt/venv; \
     /opt/venv/bin/pip install --no-cache-dir --upgrade pip; \
-    /opt/venv/bin/pip install --no-cache-dir git+https://github.com/google/spatial-media.git; \
+    /opt/venv/bin/pip install --no-cache-dir git+https://github.com/timminator/Spatial-Media-Metadata-Injector.git; \
     apt-get install -y /tmp/libMediaSDK.deb; \
     rm -rf /var/lib/apt/lists/* /tmp/libMediaSDK.deb
 
