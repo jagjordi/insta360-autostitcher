@@ -16,7 +16,6 @@ services:
       NVIDIA_VISIBLE_DEVICES: all
       NVIDIA_DRIVER_CAPABILITIES: compute,utility,video,graphics
     runtime: nvidia
-    gpus: all
     ports:
       - "${AUTO_STITCHER_PORT:-8008}:8008"
     volumes:
