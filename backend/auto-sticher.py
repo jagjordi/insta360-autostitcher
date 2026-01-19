@@ -61,7 +61,7 @@ DEFAULT_AUTO_RESOLUTION = os.getenv("AUTO_RESOLUTION", "0").lower() in {
     "yes",
     "on",
 }
-AI_STITCH_MODEL_PATH = os.getenv("AI_STITCH_MODEL_PATH", "/opt/insta360/models/ai_stitch_model_v2.ins")
+AI_STITCH_MODEL_PATH = os.getenv("AI_STITCH_MODEL_PATH", "/ai_stitcher_v2.ins")
 DEFAULT_ENABLE_H265 = os.getenv("ENABLE_H265", "1").lower() in {"1", "true", "yes", "on"}
 DEFAULT_ENABLE_FLOWSTATE = os.getenv("ENABLE_FLOWSTATE", "1").lower() in {"1", "true", "yes", "on"}
 DEFAULT_ENABLE_DIRECTIONLOCK = os.getenv("ENABLE_DIRECTIONLOCK", "1").lower() in {"1", "true", "yes", "on"}
@@ -1113,6 +1113,8 @@ class AutoStitcher:
             ]
             if self.stitch_type == "aistitch":
                 model_path = (self.ai_stitch_model_path or "").strip()
+                if (not model_path or not os.path.exists(model_path)) and os.path.exists("/ai_stitcher_v2.ins"):
+                    model_path = "/ai_stitcher_v2.ins"
                 if not model_path or not os.path.exists(model_path):
                     self.db.update_job(job_id, status=STATUS_FAILED)
                     LOGGER.error(
