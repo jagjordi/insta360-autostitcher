@@ -249,6 +249,61 @@
   color: #7b8496;
 }
 
+.status-filter-toggle {
+  border: none;
+  background: transparent;
+  font-weight: 600;
+  color: #1c2230;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  cursor: pointer;
+}
+
+.status-filter-cell {
+  position: relative;
+}
+
+.status-filter-caret {
+  font-size: 0.85rem;
+  color: #7b8496;
+}
+
+.status-filter-menu {
+  position: absolute;
+  margin-top: 0.4rem;
+  background: #fff;
+  border: 1px solid #e2e8f2;
+  border-radius: 10px;
+  padding: 0.5rem;
+  box-shadow: 0 12px 30px rgba(15, 22, 33, 0.15);
+  z-index: 20;
+  min-width: 160px;
+}
+
+.status-filter-list {
+  display: grid;
+  gap: 0.35rem;
+  margin-top: 0.35rem;
+}
+
+.status-filter-option {
+  display: flex;
+  gap: 0.4rem;
+  font-size: 0.9rem;
+  color: #1c2230;
+}
+
+.status-filter-reset {
+  border: none;
+  background: #f2f4f8;
+  color: #1c2230;
+  font-size: 0.8rem;
+  border-radius: 999px;
+  padding: 0.2rem 0.6rem;
+  cursor: pointer;
+}
+
 .sort-controls {
   display: flex;
   align-items: center;

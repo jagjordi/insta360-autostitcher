@@ -37,6 +37,13 @@ const statusClasses: Record<Job['status'], string> = {
   failed: 'status-badge failed'
 };
 
+const STATUS_OPTIONS: Array<{ value: Job['status']; label: string }> = [
+  { value: 'unprocessed', label: 'Queued' },
+  { value: 'processing', label: 'Processing' },
+  { value: 'processed', label: 'Done' },
+  { value: 'failed', label: 'Failed' }
+];
+
 function parseTimestampValue(timestamp: string): number {
   const parsed = Date.parse(timestamp);
   if (!Number.isNaN(parsed)) {
@@ -165,16 +172,27 @@ export function JobTable({
   const [page, setPage] = useState(0);
   const [sortKey, setSortKey] = useState<SortKey>('timestamp');
   const [sortDir, setSortDir] = useState<'asc' | 'desc'>('desc');
+  const [statusFilterOpen, setStatusFilterOpen] = useState(false);
+  const [statusFilter, setStatusFilter] = useState<Set<Job['status']>>(
+    () => new Set(STATUS_OPTIONS.map((option) => option.value))
+  );
   const headerCheckboxRef = useRef<HTMLInputElement>(null);
   const etaRef = useRef<Map<string, EtaSample>>(new Map());
 
   useEffect(() => {
     setPage(0);
-  }, [pageSize, jobs.length, sortKey, sortDir]);
+  }, [pageSize, jobs.length, sortKey, sortDir, statusFilter]);
+
+  const filteredJobs = useMemo(() => {
+    if (!statusFilter.size) {
+      return jobs;
+    }
+    return jobs.filter((job) => statusFilter.has(job.status));
+  }, [jobs, statusFilter]);
 
   const sortedJobs = useMemo(() => {
     const multiplier = sortDir === 'asc' ? 1 : -1;
-    return [...jobs].sort((a, b) => {
+    return [...filteredJobs].sort((a, b) => {
       let result = 0;
       if (sortKey === 'timestamp') {
         const aTime = parseTimestampValue(a.timestamp);
@@ -190,7 +208,7 @@ export function JobTable({
       }
       return result * multiplier;
     });
-  }, [jobs, sortDir, sortKey]);
+  }, [filteredJobs, sortDir, sortKey]);
 
   const totalPages = Math.max(1, Math.ceil(sortedJobs.length / pageSize));
 
@@ -330,7 +348,48 @@ export function JobTable({
               </th>
               <th>Preview</th>
               <th>Timestamp</th>
-              <th>Status</th>
+              <th className="status-filter-cell">
+                <button
+                  type="button"
+                  className="status-filter-toggle"
+                  onClick={() => setStatusFilterOpen((prev) => !prev)}
+                >
+                  Status <span className="status-filter-caret">▾</span>
+                </button>
+                {statusFilterOpen && (
+                  <div className="status-filter-menu">
+                    <button
+                      type="button"
+                      className="status-filter-reset"
+                      onClick={() => setStatusFilter(new Set(STATUS_OPTIONS.map((option) => option.value)))}
+                    >
+                      Show all
+                    </button>
+                    <div className="status-filter-list">
+                      {STATUS_OPTIONS.map((option) => (
+                        <label key={option.value} className="status-filter-option">
+                          <input
+                            type="checkbox"
+                            checked={statusFilter.has(option.value)}
+                            onChange={(event) => {
+                              setStatusFilter((prev) => {
+                                const next = new Set(prev);
+                                if (event.target.checked) {
+                                  next.add(option.value);
+                                } else {
+                                  next.delete(option.value);
+                                }
+                                return next;
+                              });
+                            }}
+                          />
+                          {option.label}
+                        </label>
+                      ))}
+                    </div>
+                  </div>
+                )}
+              </th>
               <th>Progress</th>
               <th>ETA</th>
               <th>Output</th>

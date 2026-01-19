@@ -113,6 +113,39 @@ def format_creation_time(timestamp: str) -> str:
     return timestamp
 
 
+def inject_spherical_metadata(path: str) -> bool:
+    temp_output = f"{path}.spatial.mp4"
+    cmd = [
+        "spatialmedia",
+        "-i",
+        path,
+        temp_output,
+    ]
+    try:
+        result = subprocess.run(cmd, capture_output=True, check=False)  # noqa: S603
+    except FileNotFoundError:
+        LOGGER.warning("spatialmedia not found; skipping spherical metadata for %s", path)
+        return False
+    if result.returncode != 0:
+        LOGGER.warning(
+            "spatialmedia metadata injection failed for %s: %s",
+            path,
+            result.stderr.decode(errors="ignore"),
+        )
+        if os.path.exists(temp_output):
+            try:
+                os.remove(temp_output)
+            except OSError:
+                LOGGER.warning("Failed to remove spatialmedia temp output %s", temp_output)
+        return False
+    try:
+        os.replace(temp_output, path)
+    except OSError:
+        LOGGER.warning("Failed to replace %s with spatialmedia output %s", path, temp_output)
+        return False
+    return True
+
+
 def ensure_dirs() -> None:
     LOGGER.debug(
         "Ensuring storage at %s with RAW=%s OUT=%s THUMBNAILS=%s",
@@ -1130,6 +1163,7 @@ class AutoStitcher:
                         )
                         status = STATUS_FAILED
                     else:
+                        inject_spherical_metadata(final_file)
                         status = STATUS_PROCESSED
                 if status == STATUS_FAILED and os.path.exists(temp_output):
                     try:
