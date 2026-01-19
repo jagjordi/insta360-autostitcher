@@ -12,9 +12,10 @@ RUN set -eux; \
       vulkan-tools \
       python3 \
       python3-pip \
+      git \
       python3-flask \
       ffmpeg; \
-    pip3 install --no-cache-dir spatialmedia; \
+    pip3 install --no-cache-dir git+https://github.com/google/spatial-media.git; \
     apt-get install -y /tmp/libMediaSDK.deb; \
     rm -rf /var/lib/apt/lists/* /tmp/libMediaSDK.deb
 
