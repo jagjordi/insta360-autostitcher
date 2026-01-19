@@ -5,7 +5,7 @@ Note that this tool uses Insta360 MediaSDK, which requires you to apply for the 
 
 I am not a software engineer so the code might be bad. Use it at your own risk. PRs are welcomed :)
 
-<img width="1162" height="1257" alt="image" src="https://github.com/user-attachments/assets/9ff865c8-8757-4a32-8043-907f63196ebe" />
+<img width="1145" height="1245" alt="image" src="https://github.com/user-attachments/assets/07e56894-ac66-4084-88ca-c53461f89b69" />
 
 ## Usage
 The backend service lives in `backend/`.
