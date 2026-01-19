@@ -115,17 +115,16 @@ def format_creation_time(timestamp: str) -> str:
 
 def inject_spherical_metadata(path: str) -> bool:
     temp_output = f"{path}.spatial.mp4"
-    cmd = [
-        "spatialmedia",
-        "-i",
-        path,
-        temp_output,
-    ]
+    cmd = ["spatialmedia", "-i", path, temp_output]
     try:
         result = subprocess.run(cmd, capture_output=True, check=False)  # noqa: S603
     except FileNotFoundError:
-        LOGGER.warning("spatialmedia not found; skipping spherical metadata for %s", path)
-        return False
+        cmd = ["python3", "-m", "spatialmedia", "-i", path, temp_output]
+        try:
+            result = subprocess.run(cmd, capture_output=True, check=False)  # noqa: S603
+        except FileNotFoundError:
+            LOGGER.warning("spatialmedia not found; skipping spherical metadata for %s", path)
+            return False
     if result.returncode != 0:
         LOGGER.warning(
             "spatialmedia metadata injection failed for %s: %s",
