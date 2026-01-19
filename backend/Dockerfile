@@ -20,13 +20,12 @@ RUN set -eux; \
       python3-venv \
       python3-pip \
       git \
-      python3-flask \
       ffmpeg; \
     ln -snf /usr/share/zoneinfo/$TZ /etc/localtime; \
     dpkg-reconfigure -f noninteractive tzdata; \
     python3 -m venv /opt/venv; \
     /opt/venv/bin/pip install --no-cache-dir --upgrade pip; \
-    /opt/venv/bin/pip install --no-cache-dir git+https://github.com/timminator/Spatial-Media-Metadata-Injector.git; \
+    /opt/venv/bin/pip install --no-cache-dir flask git+https://github.com/timminator/Spatial-Media-Metadata-Injector.git; \
     apt-get install -y /tmp/libMediaSDK.deb; \
     rm -rf /var/lib/apt/lists/* /tmp/libMediaSDK.deb
 
