@@ -2,6 +2,8 @@ FROM ubuntu:22.04 as base
 
 ENV DEBIAN_FRONTEND=noninteractive
 ENV TZ=Etc/UTC
+ENV VIRTUAL_ENV=/opt/venv
+ENV PATH="/opt/venv/bin:$PATH"
 
 ARG MEDIA_SDK_DEB=libMediaSDK-dev_2.0-0_amd64_ubuntu18.04.deb
 COPY ${MEDIA_SDK_DEB} /tmp/libMediaSDK.deb
@@ -15,13 +17,16 @@ RUN set -eux; \
       libdc1394-dev \
       vulkan-tools \
       python3 \
+      python3-venv \
       python3-pip \
       git \
       python3-flask \
       ffmpeg; \
     ln -snf /usr/share/zoneinfo/$TZ /etc/localtime; \
     dpkg-reconfigure -f noninteractive tzdata; \
-    pip3 install --no-cache-dir git+https://github.com/google/spatial-media.git; \
+    python3 -m venv /opt/venv; \
+    /opt/venv/bin/pip install --no-cache-dir --upgrade pip; \
+    /opt/venv/bin/pip install --no-cache-dir git+https://github.com/google/spatial-media.git; \
     apt-get install -y /tmp/libMediaSDK.deb; \
     rm -rf /var/lib/apt/lists/* /tmp/libMediaSDK.deb
 
