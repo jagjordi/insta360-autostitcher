@@ -66,6 +66,7 @@ DEFAULT_ENABLE_H265 = os.getenv("ENABLE_H265", "1").lower() in {"1", "true", "ye
 DEFAULT_ENABLE_FLOWSTATE = os.getenv("ENABLE_FLOWSTATE", "1").lower() in {"1", "true", "yes", "on"}
 DEFAULT_ENABLE_DIRECTIONLOCK = os.getenv("ENABLE_DIRECTIONLOCK", "1").lower() in {"1", "true", "yes", "on"}
 DEFAULT_ENABLE_STITCHFUSION = os.getenv("ENABLE_STITCHFUSION", "1").lower() in {"1", "true", "yes", "on"}
+DEFAULT_DISABLE_CUDA = os.getenv("DISABLE_CUDA", "0").lower() in {"1", "true", "yes", "on"}
 MIN_SUCCESS_RATIO = 0.5
 SCAN_INTERVAL = int(os.getenv("SCAN_INTERVAL", "600"))
 REST_PORT = int(os.getenv("AUTO_STITCHER_PORT", "8000"))
@@ -574,6 +575,7 @@ class AutoStitcher:
         self.enable_flowstate = DEFAULT_ENABLE_FLOWSTATE
         self.enable_directionlock = DEFAULT_ENABLE_DIRECTIONLOCK
         self.enable_stitchfusion = DEFAULT_ENABLE_STITCHFUSION
+        self.disable_cuda = DEFAULT_DISABLE_CUDA
         LOGGER.info(
             "AutoStitcher initialized with DB at %s (debug=%s)", DATABASE_PATH, self.debug_mode
         )
@@ -1130,6 +1132,8 @@ class AutoStitcher:
                 cmd.append("-enable_directionlock")
             if self.enable_stitchfusion:
                 cmd.append("-enable_stitchfusion")
+            if not self.disable_cuda:
+                cmd.extend(["-disable_cuda", "false"])
             cmd.extend(
                 [
                     "-stitch_type",

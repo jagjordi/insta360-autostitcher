@@ -15,6 +15,9 @@ services:
     environment:
       APP_STORAGE_DIR: /app
       AUTO_STITCHER_LOG_LEVEL: ${AUTO_STITCHER_LOG_LEVEL:-INFO}
+      NVIDIA_VISIBLE_DEVICES: all
+      NVIDIA_DRIVER_CAPABILITIES: compute,utility
+    gpus: all
     ports:
       - "${AUTO_STITCHER_PORT:-8008}:8008"
     volumes:
