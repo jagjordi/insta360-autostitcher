@@ -15,6 +15,7 @@ services:
       AUTO_STITCHER_LOG_LEVEL: ${AUTO_STITCHER_LOG_LEVEL:-INFO}
       NVIDIA_VISIBLE_DEVICES: all
       NVIDIA_DRIVER_CAPABILITIES: compute,utility
+    runtime: nvidia
     gpus: all
     ports:
       - "${AUTO_STITCHER_PORT:-8008}:8008"
