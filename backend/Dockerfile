@@ -30,8 +30,7 @@ RUN set -eux; \
     apt-get install -y /tmp/libMediaSDK.deb; \
     rm -rf /var/lib/apt/lists/* /tmp/libMediaSDK.deb
 
-RUN mkdir -p /opt/insta360/models
-COPY ${AI_STITCH_MODEL} /opt/insta360/models/ai_stitch_model_v2.ins
+COPY ${AI_STITCH_MODEL} /ai_stitcher_v2.ins
 
 RUN mkdir -p /app
 
