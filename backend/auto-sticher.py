@@ -61,6 +61,11 @@ DEFAULT_AUTO_RESOLUTION = os.getenv("AUTO_RESOLUTION", "0").lower() in {
     "yes",
     "on",
 }
+AI_STITCH_MODEL_PATH = os.getenv("AI_STITCH_MODEL_PATH", "/opt/insta360/models/ai_stitch_model_v2.ins")
+DEFAULT_ENABLE_H265 = os.getenv("ENABLE_H265", "1").lower() in {"1", "true", "yes", "on"}
+DEFAULT_ENABLE_FLOWSTATE = os.getenv("ENABLE_FLOWSTATE", "1").lower() in {"1", "true", "yes", "on"}
+DEFAULT_ENABLE_DIRECTIONLOCK = os.getenv("ENABLE_DIRECTIONLOCK", "1").lower() in {"1", "true", "yes", "on"}
+DEFAULT_ENABLE_STITCHFUSION = os.getenv("ENABLE_STITCHFUSION", "1").lower() in {"1", "true", "yes", "on"}
 MIN_SUCCESS_RATIO = 0.5
 SCAN_INTERVAL = int(os.getenv("SCAN_INTERVAL", "600"))
 REST_PORT = int(os.getenv("AUTO_STITCHER_PORT", "8000"))
@@ -564,6 +569,11 @@ class AutoStitcher:
             self.auto_resolution,
             self.original_bitrate,
         ) = self._load_stitch_settings()
+        self.ai_stitch_model_path = AI_STITCH_MODEL_PATH
+        self.enable_h265 = DEFAULT_ENABLE_H265
+        self.enable_flowstate = DEFAULT_ENABLE_FLOWSTATE
+        self.enable_directionlock = DEFAULT_ENABLE_DIRECTIONLOCK
+        self.enable_stitchfusion = DEFAULT_ENABLE_STITCHFUSION
         LOGGER.info(
             "AutoStitcher initialized with DB at %s (debug=%s)", DATABASE_PATH, self.debug_mode
         )
@@ -1099,8 +1109,27 @@ class AutoStitcher:
                 "-output_size",
                 output_size_value,
             ]
+            if self.stitch_type == "aistitch":
+                model_path = (self.ai_stitch_model_path or "").strip()
+                if not model_path or not os.path.exists(model_path):
+                    self.db.update_job(job_id, status=STATUS_FAILED)
+                    LOGGER.error(
+                        "AI stitch requires a model file; missing at %s for job %s",
+                        model_path or "<unset>",
+                        job_id,
+                    )
+                    return
+                cmd.extend(["-ai_stitching_model", model_path])
             if not self.original_bitrate and self.bitrate:
                 cmd.extend(["-bitrate", self.bitrate])
+            if self.enable_h265:
+                cmd.append("-enable_h265_encoder")
+            if self.enable_flowstate:
+                cmd.append("-enable_flowstate")
+            if self.enable_directionlock:
+                cmd.append("-enable_directionlock")
+            if self.enable_stitchfusion:
+                cmd.append("-enable_stitchfusion")
             cmd.extend(
                 [
                     "-stitch_type",

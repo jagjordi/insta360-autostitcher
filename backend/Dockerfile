@@ -6,6 +6,7 @@ ENV VIRTUAL_ENV=/opt/venv
 ENV PATH="/opt/venv/bin:$PATH"
 
 ARG MEDIA_SDK_DEB=libMediaSDK-dev_2.0-0_amd64_ubuntu18.04.deb
+ARG AI_STITCH_MODEL=vendor/ai_stitch_model_v2.ins
 COPY ${MEDIA_SDK_DEB} /tmp/libMediaSDK.deb
 
 RUN set -eux; \
@@ -28,6 +29,9 @@ RUN set -eux; \
     /opt/venv/bin/pip install --no-cache-dir flask git+https://github.com/timminator/Spatial-Media-Metadata-Injector.git; \
     apt-get install -y /tmp/libMediaSDK.deb; \
     rm -rf /var/lib/apt/lists/* /tmp/libMediaSDK.deb
+
+RUN mkdir -p /opt/insta360/models
+COPY ${AI_STITCH_MODEL} /opt/insta360/models/ai_stitch_model_v2.ins
 
 RUN mkdir -p /app
 
