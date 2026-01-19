@@ -1162,6 +1162,7 @@ class AutoStitcher:
                 return
             os.makedirs(os.path.dirname(log_file), exist_ok=True)
             with open(log_file, "w") as log_handle:
+                log_handle.write("Command: " + " ".join(cmd) + "\n")
                 process = subprocess.Popen(cmd, stdout=log_handle, stderr=log_handle)
             self._job_temp_outputs[job_id] = temp_output
             self.db.update_job(job_id, status=STATUS_PROCESSING, pid=process.pid)
