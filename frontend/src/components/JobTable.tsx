@@ -405,8 +405,10 @@ export function JobTable({
               );
               const selectable = selectableStatuses.has(job.status);
               const queueState = job.queue_state ?? null;
-              const badgeClass = queueState ? queueStateClasses[queueState] : statusClasses[job.status];
-              const badgeLabel = queueState ? queueStateLabels[queueState] : statusLabels[job.status];
+              const badgeClass = statusClasses[job.status];
+              const badgeLabel = statusLabels[job.status];
+              const queueBadgeClass = queueState ? queueStateClasses[queueState] : null;
+              const queueBadgeLabel = queueState ? queueStateLabels[queueState] : null;
               const etaEntry = etaRef.current.get(job.id);
               return (
                 <tr key={job.id}>
@@ -429,9 +431,12 @@ export function JobTable({
                   </td>
                   <td className="mono">{job.timestamp}</td>
                   <td>
-                    <span className={clsx(badgeClass)}>
-                      {badgeLabel}
-                    </span>
+                    <div className="status-cell">
+                      <span className={clsx(badgeClass)}>{badgeLabel}</span>
+                      {queueBadgeClass && queueBadgeLabel && (
+                        <span className={clsx(queueBadgeClass)}>{queueBadgeLabel}</span>
+                      )}
+                    </div>
                   </td>
                   <td>
                     <div className="progress">

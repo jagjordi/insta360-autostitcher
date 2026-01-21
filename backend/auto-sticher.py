@@ -1357,7 +1357,7 @@ class AutoStitcher:
         with self._lock:
             active_ids = set(self._active_threads.keys())
             queued_ids = set(self._pending_job_ids)
-        eligible_statuses = {STATUS_UNPROCESSED, STATUS_FAILED}
+        eligible_statuses = {STATUS_UNPROCESSED}
         queued_jobs = len(queued_ids)
         waiting_jobs = 0
         for job in jobs:

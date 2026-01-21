@@ -217,6 +217,7 @@
 
 .table-wrapper {
   overflow-x: auto;
+  overflow-y: visible;
 }
 
 .table-controls {
@@ -268,6 +269,7 @@
   font-size: 0.85rem;
   color: #7b8496;
 }
+
 
 .status-filter-menu {
   position: absolute;
@@ -361,6 +363,12 @@ tr:hover {
   border-radius: 999px;
   padding: 0.15rem 0.75rem;
   font-size: 0.85rem;
+}
+
+.status-cell {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem;
 }
 
 .status-badge::before {
