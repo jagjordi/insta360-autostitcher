@@ -14,14 +14,39 @@ interface JobTableProps {
 
 const PAGE_SIZES = [10, 25, 50, 100];
 
-type SortKey = 'timestamp' | 'stitched_size' | 'expected_size' | 'status';
+type SortKey = 'timestamp' | 'stitched_size' | 'expected_size' | 'status' | 'type';
 
 const SORT_OPTIONS: Array<{ value: SortKey; label: string }> = [
   { value: 'timestamp', label: 'Timestamp' },
   { value: 'stitched_size', label: 'Output Size' },
   { value: 'expected_size', label: 'Expected Size' },
-  { value: 'status', label: 'Status' }
+  { value: 'status', label: 'Status' },
+  { value: 'type', label: 'Type' }
 ];
+
+type JobType = 'image' | 'video';
+
+const getJobType = (job: Job): JobType => {
+  if (job.final_file.toLowerCase().endsWith('.jpg') || job.final_file.toLowerCase().endsWith('.jpeg')) {
+    return 'image';
+  }
+  return 'video';
+};
+
+const TYPE_OPTIONS: Array<{ value: JobType; label: string }> = [
+  { value: 'image', label: 'Image' },
+  { value: 'video', label: 'Video' }
+];
+
+const typeLabels: Record<JobType, string> = {
+  image: 'Image',
+  video: 'Video'
+};
+
+const typeClasses: Record<JobType, string> = {
+  image: 'type-badge image',
+  video: 'type-badge video'
+};
 
 const statusLabels: Record<Job['status'], string> = {
   unprocessed: 'Queued',
@@ -176,6 +201,10 @@ export function JobTable({
   const [statusFilter, setStatusFilter] = useState<Set<Job['status']>>(
     () => new Set(STATUS_OPTIONS.map((option) => option.value))
   );
+  const [typeFilterOpen, setTypeFilterOpen] = useState(false);
+  const [typeFilter, setTypeFilter] = useState<Set<JobType>>(
+    () => new Set(TYPE_OPTIONS.map((option) => option.value))
+  );
   const headerCheckboxRef = useRef<HTMLInputElement>(null);
   const etaRef = useRef<Map<string, EtaSample>>(new Map());
 
@@ -184,11 +213,15 @@ export function JobTable({
   }, [pageSize, jobs.length, sortKey, sortDir, statusFilter]);
 
   const filteredJobs = useMemo(() => {
-    if (!statusFilter.size) {
-      return jobs;
+    let result = jobs;
+    if (statusFilter.size < STATUS_OPTIONS.length) {
+      result = result.filter((job) => statusFilter.has(job.status));
     }
-    return jobs.filter((job) => statusFilter.has(job.status));
-  }, [jobs, statusFilter]);
+    if (typeFilter.size < TYPE_OPTIONS.length) {
+      result = result.filter((job) => typeFilter.has(getJobType(job)));
+    }
+    return result;
+  }, [jobs, statusFilter, typeFilter]);
 
   const sortedJobs = useMemo(() => {
     const multiplier = sortDir === 'asc' ? 1 : -1;
@@ -200,6 +233,8 @@ export function JobTable({
         result = aTime - bTime;
       } else if (sortKey === 'status') {
         result = a.status.localeCompare(b.status);
+      } else if (sortKey === 'type') { // @ts-ignore
+        result = getJobType(a).localeCompare(getJobType(b));
       } else {
         result = (a[sortKey] ?? 0) - (b[sortKey] ?? 0);
       }
@@ -347,7 +382,50 @@ export function JobTable({
                 />
               </th>
               <th>Preview</th>
+
               <th>Timestamp</th>
+              <th className="status-filter-cell">
+                <button
+                  type="button"
+                  className="status-filter-toggle"
+                  onClick={() => setTypeFilterOpen((prev) => !prev)}
+                >
+                  Type <span className="status-filter-caret">▾</span>
+                </button>
+                {typeFilterOpen && (
+                  <div className="status-filter-menu">
+                    <button
+                      type="button"
+                      className="status-filter-reset"
+                      onClick={() => setTypeFilter(new Set(TYPE_OPTIONS.map((option) => option.value)))}
+                    >
+                      Show all
+                    </button>
+                    <div className="status-filter-list">
+                      {TYPE_OPTIONS.map((option) => (
+                        <label key={option.value} className="status-filter-option">
+                          <input
+                            type="checkbox"
+                            checked={typeFilter.has(option.value)}
+                            onChange={(event) => {
+                              setTypeFilter((prev) => {
+                                const next = new Set(prev);
+                                if (event.target.checked) {
+                                  next.add(option.value);
+                                } else {
+                                  next.delete(option.value);
+                                }
+                                return next;
+                              });
+                            }}
+                          />
+                          {option.label}
+                        </label>
+                      ))}
+                    </div>
+                  </div>
+                )}
+              </th>
               <th className="status-filter-cell">
                 <button
                   type="button"
@@ -430,6 +508,9 @@ export function JobTable({
                     )}
                   </td>
                   <td className="mono">{job.timestamp}</td>
+                  <td>
+                    <span className={typeClasses[getJobType(job)]}>{typeLabels[getJobType(job)]}</span>
+                  </td>
                   <td>
                     <div className="status-cell">
                       <span className={clsx(badgeClass)}>{badgeLabel}</span>
