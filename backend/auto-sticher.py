@@ -184,7 +184,7 @@ def inject_spherical_metadata(path: str) -> bool:
     return True
 
 
-def inject_image_metadata(path: str) -> bool:
+def inject_image_metadata(path: str, timestamp_str: Optional[str] = None) -> bool:
     # Get image dimensions first
     cmd_dim = [
         "exiftool",
@@ -225,8 +225,21 @@ def inject_image_metadata(path: str) -> bool:
         f"-XMP-GPano:FullPanoHeightPixels={height}",
         "-XMP-GPano:CroppedAreaLeftPixels=0",
         "-XMP-GPano:CroppedAreaTopPixels=0",
-        path,
     ]
+    if timestamp_str:
+        # timestamp_str is YYYYMMDD_HHMMSS
+        # exiftool expects YYYY:MM:DD HH:MM:SS
+        try:
+            ts_iso = f"{timestamp_str[:4]}:{timestamp_str[4:6]}:{timestamp_str[6:8]} {timestamp_str[9:11]}:{timestamp_str[11:13]}:{timestamp_str[13:15]}"
+            cmd_inject.extend([
+                f"-DateTimeOriginal={ts_iso}",
+                f"-CreateDate={ts_iso}",
+                f"-ModifyDate={ts_iso}",
+            ])
+        except IndexError:
+            LOGGER.warning("Failed to parse timestamp %s for exiftool", timestamp_str)
+
+    cmd_inject.append(path)
 
     try:
         result_inject = subprocess.run(cmd_inject, capture_output=True, check=False)  # noqa: S603
@@ -1268,7 +1281,10 @@ class AutoStitcher:
                     if final_file.lower().endswith((".jpg", ".jpeg")):
                         try:
                             os.replace(temp_output, final_file)
-                            inject_image_metadata(final_file)
+                        try:
+                            os.replace(temp_output, final_file)
+                            inject_image_metadata(final_file, row["timestamp"])
+                            status = STATUS_PROCESSED
                             status = STATUS_PROCESSED
                         except OSError as e:
                             LOGGER.error("Failed to move temp image to %s: %s", final_file, e)
