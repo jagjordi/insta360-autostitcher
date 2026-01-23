@@ -274,8 +274,8 @@ def stitched_path(timestamp: str, prefix: str = "VID") -> str:
     return os.path.join(OUT_DIR, f"{prefix}_{timestamp}{ext}")
 
 
-def log_path(timestamp: str) -> str:
-    return os.path.join(OUT_DIR, f"VID_{timestamp}.log")
+def log_path(timestamp: str, prefix: str = "VID") -> str:
+    return os.path.join(OUT_DIR, f"{prefix}_{timestamp}.log")
 
 
 def thumbnail_path(job_id: str) -> str:
@@ -1167,8 +1167,13 @@ class AutoStitcher:
                     LOGGER.warning("Job %s source files have mismatched sizes", job_id)
                     return
             final_file = row["final_file"]
-            temp_output = f"{final_file}.{uuid.uuid4()}.tmp"
-            log_file = log_path(row["timestamp"])
+            # To satisfy OpenCV (for images), the temp file must share the extension (e.g. .jpg)
+            # e.g. /app/stitched/.tmp.<uuid>.IMG_2026...jpg
+            dirname = os.path.dirname(final_file)
+            basename = os.path.basename(final_file)
+            temp_output = os.path.join(dirname, f".tmp.{uuid.uuid4()}.{basename}")
+            prefix = "IMG" if final_file.lower().endswith((".jpg", ".jpeg", ".insp")) else "VID"
+            log_file = log_path(row["timestamp"], prefix=prefix)
             LOGGER.info("Job %s starting stitch to %s", job_id, final_file)
             output_size_value = self.output_size or DEFAULT_OUTPUT_SIZE
             if self.auto_resolution:
@@ -1240,6 +1245,7 @@ class AutoStitcher:
             os.makedirs(os.path.dirname(log_file), exist_ok=True)
             with open(log_file, "w") as log_handle:
                 log_handle.write("Command: " + " ".join(cmd) + "\n")
+                log_handle.flush()
                 process = subprocess.Popen(cmd, stdout=log_handle, stderr=log_handle)
             self._job_temp_outputs[job_id] = temp_output
             self.db.update_job(job_id, status=STATUS_PROCESSING, pid=process.pid)
