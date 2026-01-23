@@ -21,6 +21,7 @@ RUN set -eux; \
       python3-venv \
       python3-pip \
       git \
+      libimage-exiftool-perl \
       ffmpeg; \
     ln -snf /usr/share/zoneinfo/$TZ /etc/localtime; \
     dpkg-reconfigure -f noninteractive tzdata; \
