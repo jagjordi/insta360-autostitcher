@@ -952,13 +952,21 @@ class AutoStitcher:
             elif stream_count == 1:
                 camera_10 = os.path.join(RAW_DIR, f"{prefix}_{timestamp}_10_{segment}.{ext}")
                 if not os.path.exists(camera_10):
-                    LOGGER.debug(
-                        "Single-stream file %s missing counterpart %s; skipping",
-                        camera_00,
-                        camera_10,
-                    )
-                    continue
-                source_files = [camera_00, camera_10]
+                    if prefix == "IMG" or ext.lower() == "insp":
+                        LOGGER.debug(
+                            "Single-stream file %s missing counterpart; assuming single-file image",
+                            camera_00,
+                        )
+                        source_files = [camera_00]
+                    else:
+                        LOGGER.debug(
+                            "Single-stream file %s missing counterpart %s; skipping",
+                            camera_00,
+                            camera_10,
+                        )
+                        continue
+                else:
+                    source_files = [camera_00, camera_10]
             else:
                 LOGGER.warning(
                     "File %s reported %d video streams; skipping", camera_00, stream_count
