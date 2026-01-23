@@ -85,7 +85,7 @@ STATUS_VALUES = {
     STATUS_FAILED,
 }
 
-FILE_PATTERN = re.compile(r"VID_(\d{8}_\d{6})_00_(\d{3})\.insv")
+FILE_PATTERN = re.compile(r"(VID|IMG)_(\d{8}_\d{6})_00_(\d{3})\.(insv|insp)")
 LOGGER = logging.getLogger("insta360_autostitcher")
 
 
@@ -184,6 +184,66 @@ def inject_spherical_metadata(path: str) -> bool:
     return True
 
 
+def inject_image_metadata(path: str) -> bool:
+    # Get image dimensions first
+    cmd_dim = [
+        "exiftool",
+        "-s",
+        "-s",
+        "-s",
+        "-ImageWidth",
+        "-ImageHeight",
+        path,
+    ]
+    try:
+        result_dim = subprocess.run(cmd_dim, capture_output=True, text=True, check=False)  # noqa: S603
+    except FileNotFoundError:
+        LOGGER.error("exiftool not found; skipping image metadata injection for %s", path)
+        return False
+
+    if result_dim.returncode != 0:
+        LOGGER.warning("exiftool failed to read dimensions for %s", path)
+        return False
+
+    lines = result_dim.stdout.strip().splitlines()
+    if len(lines) < 2:
+        LOGGER.warning("Could not parse dimensions from exiftool output for %s", path)
+        return False
+
+    width = lines[0].strip()
+    height = lines[1].strip()
+
+    # Inject XMP-GPano tags
+    cmd_inject = [
+        "exiftool",
+        "-overwrite_original",
+        "-XMP-GPano:ProjectionType=equirectangular",
+        "-XMP-GPano:UsePanoramaViewer=True",
+        f"-XMP-GPano:CroppedAreaImageWidthPixels={width}",
+        f"-XMP-GPano:CroppedAreaImageHeightPixels={height}",
+        f"-XMP-GPano:FullPanoWidthPixels={width}",
+        f"-XMP-GPano:FullPanoHeightPixels={height}",
+        "-XMP-GPano:CroppedAreaLeftPixels=0",
+        "-XMP-GPano:CroppedAreaTopPixels=0",
+        path,
+    ]
+
+    try:
+        result_inject = subprocess.run(cmd_inject, capture_output=True, check=False)  # noqa: S603
+    except FileNotFoundError:
+        return False
+
+    if result_inject.returncode != 0:
+        LOGGER.warning(
+            "exiftool injection failed for %s: %s",
+            path,
+            result_inject.stderr.decode(errors="ignore"),
+        )
+        return False
+
+    return True
+
+
 def ensure_dirs() -> None:
     LOGGER.debug(
         "Ensuring storage at %s with RAW=%s OUT=%s THUMBNAILS=%s",
@@ -209,8 +269,9 @@ def is_file_writing(path: str) -> bool:
     return writing
 
 
-def stitched_path(timestamp: str) -> str:
-    return os.path.join(OUT_DIR, f"VID_{timestamp}.mp4")
+def stitched_path(timestamp: str, prefix: str = "VID") -> str:
+    ext = ".jpg" if prefix == "IMG" else ".mp4"
+    return os.path.join(OUT_DIR, f"{prefix}_{timestamp}{ext}")
 
 
 def log_path(timestamp: str) -> str:
@@ -377,10 +438,11 @@ class JobCandidate:
     timestamp: str
     segment: str
     source_files: List[str]
+    prefix: str = "VID"
 
     @property
     def final_file(self) -> str:
-        return stitched_path(self.timestamp)
+        return stitched_path(self.timestamp, self.prefix)
 
     def sources(self) -> List[str]:
         return list(self.source_files)
@@ -870,8 +932,8 @@ class AutoStitcher:
             match = FILE_PATTERN.match(file_name)
             if not match:
                 continue
-            timestamp, segment = match.groups()
-            final_file = stitched_path(timestamp)
+            prefix, timestamp, segment, ext = match.groups()
+            final_file = stitched_path(timestamp, prefix)
             if final_file in existing:
                 LOGGER.debug("Candidate %s already tracked; skipping early", final_file)
                 continue
@@ -888,7 +950,7 @@ class AutoStitcher:
                     camera_00,
                 )
             elif stream_count == 1:
-                camera_10 = os.path.join(RAW_DIR, f"VID_{timestamp}_10_{segment}.insv")
+                camera_10 = os.path.join(RAW_DIR, f"{prefix}_{timestamp}_10_{segment}.{ext}")
                 if not os.path.exists(camera_10):
                     LOGGER.debug(
                         "Single-stream file %s missing counterpart %s; skipping",
@@ -903,7 +965,7 @@ class AutoStitcher:
                 )
                 continue
             key = f"{timestamp}_{segment}"
-            candidates[key] = JobCandidate(timestamp, segment, source_files)
+            candidates[key] = JobCandidate(timestamp, segment, source_files, prefix)
             LOGGER.debug(
                 "Found candidate %s segment %s with %d source(s)",
                 timestamp,
@@ -1184,55 +1246,64 @@ class AutoStitcher:
                 ratio = min(output_size / expected_size, 1.0) if expected_size else 0
                 status = STATUS_FAILED
                 if process.returncode == 0 and os.path.exists(temp_output):
-                    timestamp_iso = format_creation_time(row["timestamp"])
-                    ffmpeg_cmd = [
-                        "ffmpeg",
-                        "-y",
-                        "-i",
-                        temp_output,
-                        "-c",
-                        "copy",
-                        "-map",
-                        "0",
-                        "-metadata",
-                        f"creation_time={timestamp_iso}",
-                        "-metadata",
-                        "spherical=true",
-                        "-metadata",
-                        "stitched=true",
-                        "-metadata",
-                        "projection_type=equirectangular",
-                        "-metadata",
-                        "stereo_mode=mono",
-                        "-metadata",
-                        "stitching_software=Insta360-AutoStitcher",
-                        "-metadata:s:v:0",
-                        f"creation_time={timestamp_iso}",
-                        "-metadata:s:v:0",
-                        "spherical=true",
-                        "-metadata:s:v:0",
-                        "stitched=true",
-                        "-metadata:s:v:0",
-                        "projection_type=equirectangular",
-                        "-metadata:s:v:0",
-                        "stereo_mode=mono",
-                        "-metadata:s:v:0",
-                        "stitching_software=Insta360-AutoStitcher",
-                        "-metadata:s:a:0",
-                        f"creation_time={timestamp_iso}",
-                        final_file,
-                    ]
-                    ffmpeg_proc = subprocess.run(ffmpeg_cmd, capture_output=True)  # noqa: S603
-                    if ffmpeg_proc.returncode != 0:
-                        LOGGER.error(
-                            "ffmpeg metadata injection failed for job %s: %s",
-                            job_id,
-                            ffmpeg_proc.stderr.decode(errors="ignore"),
-                        )
-                        status = STATUS_FAILED
+                    if final_file.lower().endswith((".jpg", ".jpeg")):
+                        try:
+                            os.replace(temp_output, final_file)
+                            inject_image_metadata(final_file)
+                            status = STATUS_PROCESSED
+                        except OSError as e:
+                            LOGGER.error("Failed to move temp image to %s: %s", final_file, e)
+                            status = STATUS_FAILED
                     else:
-                        inject_spherical_metadata(final_file)
-                        status = STATUS_PROCESSED
+                        timestamp_iso = format_creation_time(row["timestamp"])
+                        ffmpeg_cmd = [
+                            "ffmpeg",
+                            "-y",
+                            "-i",
+                            temp_output,
+                            "-c",
+                            "copy",
+                            "-map",
+                            "0",
+                            "-metadata",
+                            f"creation_time={timestamp_iso}",
+                            "-metadata",
+                            "spherical=true",
+                            "-metadata",
+                            "stitched=true",
+                            "-metadata",
+                            "projection_type=equirectangular",
+                            "-metadata",
+                            "stereo_mode=mono",
+                            "-metadata",
+                            "stitching_software=Insta360-AutoStitcher",
+                            "-metadata:s:v:0",
+                            f"creation_time={timestamp_iso}",
+                            "-metadata:s:v:0",
+                            "spherical=true",
+                            "-metadata:s:v:0",
+                            "stitched=true",
+                            "-metadata:s:v:0",
+                            "projection_type=equirectangular",
+                            "-metadata:s:v:0",
+                            "stereo_mode=mono",
+                            "-metadata:s:v:0",
+                            "stitching_software=Insta360-AutoStitcher",
+                            "-metadata:s:a:0",
+                            f"creation_time={timestamp_iso}",
+                            final_file,
+                        ]
+                        ffmpeg_proc = subprocess.run(ffmpeg_cmd, capture_output=True)  # noqa: S603
+                        if ffmpeg_proc.returncode != 0:
+                            LOGGER.error(
+                                "ffmpeg metadata injection failed for job %s: %s",
+                                job_id,
+                                ffmpeg_proc.stderr.decode(errors="ignore"),
+                            )
+                            status = STATUS_FAILED
+                        else:
+                            inject_spherical_metadata(final_file)
+                            status = STATUS_PROCESSED
                 if status == STATUS_FAILED and os.path.exists(temp_output):
                     try:
                         os.remove(temp_output)
