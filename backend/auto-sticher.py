@@ -1281,10 +1281,7 @@ class AutoStitcher:
                     if final_file.lower().endswith((".jpg", ".jpeg")):
                         try:
                             os.replace(temp_output, final_file)
-                        try:
-                            os.replace(temp_output, final_file)
                             inject_image_metadata(final_file, row["timestamp"])
-                            status = STATUS_PROCESSED
                             status = STATUS_PROCESSED
                         except OSError as e:
                             LOGGER.error("Failed to move temp image to %s: %s", final_file, e)
