@@ -909,8 +909,13 @@ class AutoStitcher:
             width, height = resolution
             if width <= 0 or height <= 0:
                 continue
-            derived_width = max(2 * width, 2)
-            derived_height = max(height, 2)
+            # If input is already 2:1 (e.g. 5760x2880), assume it's valid and don't double width
+            if width == 2 * height:
+                derived_width = width
+                derived_height = height
+            else:
+                derived_width = max(2 * width, 2)
+                derived_height = max(height, 2)
             output = f"{derived_width}x{derived_height}"
             LOGGER.debug("Derived auto output size %s from %s", output, path)
             return output
