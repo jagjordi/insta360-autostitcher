@@ -5,7 +5,7 @@ ENV TZ=Etc/UTC
 ENV VIRTUAL_ENV=/opt/venv
 ENV PATH="/opt/venv/bin:$PATH"
 
-ARG MEDIA_SDK_DEB=libMediaSDK-dev_2.0-0_amd64_ubuntu18.04.deb
+ARG MEDIA_SDK_DEB=vendor/libmediasdk.deb
 ARG AI_STITCH_MODEL=vendor/ai_stitch_model_v2.ins
 COPY ${MEDIA_SDK_DEB} /tmp/libMediaSDK.deb
 

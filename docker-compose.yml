@@ -5,7 +5,7 @@ services:
     build:
       context: ./backend
       args:
-        - MEDIA_SDK_DEB=${MEDIA_SDK_DEB:-libMediaSDK-dev_2.0-0_amd64_ubuntu18.04.deb}
+        - MEDIA_SDK_DEB=${MEDIA_SDK_DEB:-vendor/libmediasdk.deb}
         - AI_STITCH_MODEL=${AI_STITCH_MODEL:-vendor/ai_stitch_model_v2.ins}
     container_name: insta360-backend
     env_file:

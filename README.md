@@ -11,7 +11,7 @@ I am not a software engineer so the code might be bad. Use it at your own risk. 
 The backend service lives in `backend/`.
 
 1. Get the MediaSDK by applying [here](https://www.insta360.com/sdk/home). Insta360 does not allow redistribution, so each user must download the `.deb` themselves.
-2. Place the downloaded `libMediaSDK-dev_2.0-0_amd64_ubuntu18.04.deb` (or whichever version you received) somewhere under `backend/` (e.g. `backend/vendor/libMediaSDK-dev_...deb`) and set `MEDIA_SDK_DEB` in `.env` (or pass `--build-arg MEDIA_SDK_DEB=vendor/your-file.deb`) so Docker knows which file to copy during the build.
+2. Place the downloaded MediaSDK `.deb` (e.g. `libmediasdk.deb`, version 3.1.1 or whichever version you received) somewhere under `backend/` (e.g. `backend/vendor/libmediasdk.deb`) and set `MEDIA_SDK_DEB` in `.env` (or pass `--build-arg MEDIA_SDK_DEB=vendor/your-file.deb`) so Docker knows which file to copy during the build.
    - Start by copying `.env.example` to `.env` and adjust the paths/ports for your environment.
 3. Build the docker images (from the repo root):
 ```bash
@@ -22,7 +22,7 @@ docker compose build
 docker compose up
 ```
 
-> The `MEDIA_SDK_DEB` build arg (wired through `.env` and `docker-compose.yml`) must point to the relative path of the Insta360 SDK `.deb` within the `backend/` directory. If you keep the file at `backend/vendor/libMediaSDK-dev_2.0-0_amd64_ubuntu18.04.deb`, set `MEDIA_SDK_DEB=vendor/libMediaSDK-dev_2.0-0_amd64_ubuntu18.04.deb` in `.env` before running `docker compose build`.
+> The `MEDIA_SDK_DEB` build arg (wired through `.env` and `docker-compose.yml`) must point to the relative path of the Insta360 SDK `.deb` within the `backend/` directory. If you keep the file at `backend/vendor/libmediasdk.deb`, set `MEDIA_SDK_DEB=vendor/libmediasdk.deb` in `.env` before running `docker compose build`.
 
 All runtime data (SQLite DB, RAW uploads, stitched output, logs, thumbnails) now lives under a single storage root controlled by the `APP_STORAGE_DIR` environment variable (defaults to `/app`). In Docker we bind-mount the host paths from `.env` (`APP_STORAGE_DIR`, `RAW_DIR`, `OUT_DIR`) into `/app`, `/app/raw`, and `/app/stitched` respectively, while thumbnails are saved under `/app/thumbnails`.
 
