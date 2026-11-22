@@ -7,3 +7,4 @@ backend/test/raw/VID_20251227_133347_00_045.insv
 backend/test/raw/test.mp4
 backend/test/stitched/VID_20251227_133347.log
 .env
+backend/.venv

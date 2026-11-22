@@ -16,6 +16,8 @@ RUN set -eux; \
       libjpeg-dev \
       libtiff-dev \
       libdc1394-dev \
+      libgtk-3-0 \
+      xserver-xorg-core \
       vulkan-tools \
       python3 \
       python3-venv \
@@ -29,7 +31,10 @@ RUN set -eux; \
     /opt/venv/bin/pip install --no-cache-dir --upgrade pip; \
     /opt/venv/bin/pip install --no-cache-dir flask git+https://github.com/timminator/Spatial-Media-Metadata-Injector.git; \
     apt-get install -y /tmp/libMediaSDK.deb; \
+    ln -s /opt/MediaSDK-*-linux /opt/MediaSDK; \
     rm -rf /var/lib/apt/lists/* /tmp/libMediaSDK.deb
+
+ENV PATH="/opt/MediaSDK/bin:$PATH"
 
 COPY ${AI_STITCH_MODEL} /ai_stitcher_v2.ins
 
@@ -38,7 +43,8 @@ RUN mkdir -p /app
 WORKDIR /opt/insta360
 
 COPY ./auto-sticher.py /opt/insta360/run.py
+COPY ./entrypoint.sh /opt/insta360/entrypoint.sh
 
 ENV APP_STORAGE_DIR=/app
 
-CMD ["python3", "/opt/insta360/run.py"]
+CMD ["sh", "/opt/insta360/entrypoint.sh"]

@@ -13,6 +13,7 @@ import json
 import logging
 import os
 import re
+import socket
 import sqlite3
 import subprocess
 import threading
@@ -62,6 +63,9 @@ DEFAULT_AUTO_RESOLUTION = os.getenv("AUTO_RESOLUTION", "0").lower() in {
     "on",
 }
 AI_STITCH_MODEL_PATH = os.getenv("AI_STITCH_MODEL_PATH", "/ai_stitcher_v2.ins")
+# MediaSDK 3.1.5's GPU image processing needs an X display (started by entrypoint.sh);
+# without one it renders garbage, so jobs fall back to "cpu" when X is unavailable.
+IMAGE_PROCESSING_ACCEL = os.getenv("IMAGE_PROCESSING_ACCEL", "cpu").strip()
 DEFAULT_ENABLE_H265 = os.getenv("ENABLE_H265", "1").lower() in {"1", "true", "yes", "on"}
 DEFAULT_ENABLE_FLOWSTATE = os.getenv("ENABLE_FLOWSTATE", "1").lower() in {"1", "true", "yes", "on"}
 DEFAULT_ENABLE_DIRECTIONLOCK = os.getenv("ENABLE_DIRECTIONLOCK", "1").lower() in {"1", "true", "yes", "on"}
@@ -73,6 +77,32 @@ REST_PORT = int(os.getenv("AUTO_STITCHER_PORT", "8000"))
 LOG_LEVEL = os.getenv("AUTO_STITCHER_LOG_LEVEL", "INFO")
 DEBUG_FLAG = os.getenv("AUTO_STITCHER_DEBUG", "0").lower() in {"1", "true", "yes", "on"}
 LOGIN_TOKEN = os.getenv("LOGIN_TOKEN", "")
+
+def x_display_available() -> bool:
+    """Return True if the X server named by $DISPLAY accepts connections."""
+    display = os.getenv("DISPLAY", "")
+    match = re.fullmatch(r":(\d+)(?:\.\d+)?", display)
+    if not match:
+        return False
+    try:
+        with closing(socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)) as sock:
+            sock.settimeout(2)
+            sock.connect(f"/tmp/.X11-unix/X{match.group(1)}")
+        return True
+    except OSError:
+        return False
+
+
+def effective_image_processing_accel() -> str:
+    if IMAGE_PROCESSING_ACCEL and IMAGE_PROCESSING_ACCEL != "cpu" and not x_display_available():
+        LOGGER.warning(
+            "X display %r unavailable; using CPU image processing instead of %r",
+            os.getenv("DISPLAY", ""),
+            IMAGE_PROCESSING_ACCEL,
+        )
+        return "cpu"
+    return IMAGE_PROCESSING_ACCEL
+
 
 STATUS_UNPROCESSED = "unprocessed"
 STATUS_PROCESSING = "processing"
@@ -1204,19 +1234,10 @@ class AutoStitcher:
                 "-output_size",
                 output_size_value,
             ]
-            if self.stitch_type == "aistitch":
-                model_path = (self.ai_stitch_model_path or "").strip()
-                if (not model_path or not os.path.exists(model_path)) and os.path.exists("/ai_stitcher_v2.ins"):
-                    model_path = "/ai_stitcher_v2.ins"
-                if not model_path or not os.path.exists(model_path):
-                    self.db.update_job(job_id, status=STATUS_FAILED)
-                    LOGGER.error(
-                        "AI stitch requires a model file; missing at %s for job %s",
-                        model_path or "<unset>",
-                        job_id,
-                    )
-                    return
-                cmd.extend(["-ai_stitching_model", model_path])
+            # MediaSDK >= 3.1.5 loads the AI stitch model from <exe>/models/ automatically.
+            image_processing_accel = effective_image_processing_accel()
+            if image_processing_accel:
+                cmd.extend(["-image_processing_accel", image_processing_accel])
             if not self.original_bitrate and self.bitrate:
                 cmd.extend(["-bitrate", self.bitrate])
             if self.enable_h265:
